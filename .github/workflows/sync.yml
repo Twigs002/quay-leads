@@ -1,0 +1,40 @@
+name: Sync leads → Supabase
+
+# Every 30 min + manual trigger. Sync ~12k rows + ~3k HubSpot enrichments
+# in ~1-2 minutes well under HubSpot rate limits.
+on:
+  schedule:
+    - cron: '0,30 * * * *'
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: 'Why are you triggering a manual sync?'
+        required: false
+        default: 'on demand'
+
+concurrency:
+  group: sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install deps
+        working-directory: scripts
+        run: pip install -r requirements.txt
+
+      - name: Run sync
+        working-directory: scripts
+        env:
+          HUBSPOT_TOKEN:        ${{ secrets.HUBSPOT_TOKEN }}
+          SUPABASE_URL:         https://dqszbqiimbfvmmnpgpsb.supabase.co
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          GCP_SA_JSON:          ${{ secrets.GCP_SA_JSON }}
+        run: python3 sync.py

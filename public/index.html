@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Quay 1 — Seller Leads</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&family=Permanent+Marker&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <!-- Login screen (shown until session exists) -->
+  <div id="login" class="login hidden">
+    <div class="login-card">
+      <h1>Quay 1<br><span class="thin">— Seller Leads</span></h1>
+      <p class="muted">Sign in with your clock-in username + PIN.<br>Superuser access only.</p>
+      <form id="login-form">
+        <label>Username
+          <input id="login-user" type="text" autocomplete="username" placeholder="e.g. pagan" required>
+        </label>
+        <label>PIN
+          <input id="login-pin" type="password" autocomplete="current-password" required>
+        </label>
+        <button type="submit" class="btn-primary">Sign in</button>
+        <div id="login-error" class="error" hidden></div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Main app shell -->
+  <div id="app" class="app hidden">
+    <header class="topnav">
+      <div class="brand">
+        <span class="brand-dot"></span>
+        <span class="brand-name">Quay 1 · Seller Leads</span>
+      </div>
+      <nav class="tabs">
+        <a href="#/overview"        data-tab="overview">Overview</a>
+        <a href="#/sources"         data-tab="sources">Sources</a>
+        <a href="#/pipeline"        data-tab="pipeline">Pipeline</a>
+        <a href="#/action-tracker"  data-tab="action-tracker">Action Tracker</a>
+        <a href="#/raw-data"        data-tab="raw-data">Raw Data</a>
+      </nav>
+      <div class="user-chip">
+        <span id="user-label" class="muted"></span>
+        <button id="signout" class="btn-ghost">Sign out</button>
+      </div>
+    </header>
+
+    <div class="body">
+      <aside class="sidebar">
+        <h3>Filters</h3>
+        <div class="filter-group">
+          <label>Date from
+            <input type="date" id="f-from">
+          </label>
+          <label>Date to
+            <input type="date" id="f-to">
+          </label>
+        </div>
+        <div class="filter-group">
+          <label>Division
+            <select id="f-division" multiple size="6"></select>
+          </label>
+        </div>
+        <div class="filter-group">
+          <label>Source
+            <select id="f-source" multiple size="6"></select>
+          </label>
+        </div>
+        <div class="filter-group">
+          <label>Lead type
+            <select id="f-leadtype" multiple size="4"></select>
+          </label>
+        </div>
+        <div class="filter-group">
+          <label class="row">
+            <input type="checkbox" id="f-nodeal"> No deal yet only
+          </label>
+        </div>
+        <div class="filter-group">
+          <button id="f-reset" class="btn-ghost">Reset filters</button>
+        </div>
+        <div class="sidebar-foot muted small">
+          <div id="sync-status">Loading…</div>
+        </div>
+      </aside>
+
+      <main id="view" class="view">
+        <div class="loading">Loading…</div>
+      </main>
+    </div>
+  </div>
+
+  <!-- vendor -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+
+  <!-- app -->
+  <script src="config.js"></script>
+  <script src="theme.js"></script>
+  <script src="data.js"></script>
+  <script src="filters.js"></script>
+  <script src="views/overview.js"></script>
+  <script src="views/sources.js"></script>
+  <script src="views/pipeline.js"></script>
+  <script src="views/action_tracker.js"></script>
+  <script src="views/raw_data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

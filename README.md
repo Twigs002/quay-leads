@@ -73,7 +73,7 @@ gh secret set GCP_SA_JSON            < ~/Downloads/quay-leads-dashboard-cf0b1e39
 
 ```bash
 gh api -X POST repos/Twigs002/quay-leads/pages \
-  -F source.branch=main -F source.path=/public
+  -F source.branch=main -F source.path=/
 ```
 
 ### 4. First sync
@@ -109,7 +109,7 @@ python3 sync.py
 
 ```
 quay-leads/
-├── public/                    ← Pages serves from here
+├── ./                    ← Pages serves from here
 │   ├── index.html             ← shell + login
 │   ├── styles.css             ← v2 light theme tokens
 │   ├── app.js                 ← bootstrap, auth, router

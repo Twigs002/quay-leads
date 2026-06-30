@@ -203,6 +203,79 @@ body {
   color: var(--ink);
 }
 .filter-group select[multiple] { min-height: 100px; }
+
+/* ── Multi-select disclosure (Streamlit-style) ────────────────────── */
+details.multi {
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--paper);
+  overflow: hidden;
+}
+details.multi summary {
+  list-style: none;
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+  font-size: 13px;
+  user-select: none;
+}
+details.multi summary::-webkit-details-marker { display: none; }
+details.multi summary .label {
+  font-size: 11px; font-weight: 600; color: var(--slate);
+  text-transform: uppercase; letter-spacing: 0.04em;
+}
+details.multi summary .summary-value {
+  flex: 1; color: var(--ink); font-weight: 500;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+details.multi summary .chev {
+  color: var(--muted); font-size: 10px;
+  transition: transform 0.15s;
+}
+details.multi[open] summary .chev { transform: rotate(180deg); }
+details.multi[open] summary {
+  border-bottom: 1px solid var(--line);
+  background: var(--card);
+}
+.multi-body { background: var(--card); }
+.multi-search {
+  width: 100%;
+  padding: 7px 10px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  font-family: var(--sans);
+  font-size: 12px;
+  background: transparent;
+  color: var(--ink);
+}
+.multi-search:focus { outline: none; background: var(--paper); }
+.multi-list {
+  max-height: 200px;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+.multi-list label {
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 12px;
+  font-size: 13px;
+  color: var(--ink);
+  cursor: pointer;
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 400;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.multi-list label:hover { background: var(--paper); }
+.multi-list label input[type=checkbox] {
+  margin: 0;
+  accent-color: var(--yellow-deep);
+  flex-shrink: 0;
+}
+.multi-list .empty { padding: 14px 12px; color: var(--muted); font-size: 12px; text-align: center; }
+.summary-value.selected { color: var(--yellow-deep); font-weight: 700; }
+
 .sidebar-foot { margin-top: auto; padding-top: 12px; border-top: 1px solid var(--line); }
 .small { font-size: 11px; }
 

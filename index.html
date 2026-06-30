@@ -59,21 +59,40 @@
             <input type="date" id="f-to">
           </label>
         </div>
-        <div class="filter-group">
-          <label>Division
-            <select id="f-division" multiple size="6"></select>
-          </label>
-        </div>
-        <div class="filter-group">
-          <label>Source
-            <select id="f-source" multiple size="6"></select>
-          </label>
-        </div>
-        <div class="filter-group">
-          <label>Lead type
-            <select id="f-leadtype" multiple size="4"></select>
-          </label>
-        </div>
+        <details class="multi" id="ms-division">
+          <summary>
+            <span class="label">Division</span>
+            <span class="summary-value">All</span>
+            <span class="chev">▾</span>
+          </summary>
+          <div class="multi-body">
+            <input type="text" class="multi-search" placeholder="search…" data-target="ms-division">
+            <div class="multi-list" data-target="ms-division"></div>
+          </div>
+        </details>
+
+        <details class="multi" id="ms-source">
+          <summary>
+            <span class="label">Source</span>
+            <span class="summary-value">All</span>
+            <span class="chev">▾</span>
+          </summary>
+          <div class="multi-body">
+            <input type="text" class="multi-search" placeholder="search…" data-target="ms-source">
+            <div class="multi-list" data-target="ms-source"></div>
+          </div>
+        </details>
+
+        <details class="multi" id="ms-leadtype">
+          <summary>
+            <span class="label">Lead type</span>
+            <span class="summary-value">All</span>
+            <span class="chev">▾</span>
+          </summary>
+          <div class="multi-body">
+            <div class="multi-list" data-target="ms-leadtype"></div>
+          </div>
+        </details>
         <div class="filter-group">
           <label class="row">
             <input type="checkbox" id="f-nodeal"> No deal yet only

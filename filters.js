@@ -1,5 +1,6 @@
-// Global filter state, shared across views.
-// Stored in URL hash so refreshes preserve the user's view.
+// Global filter state + sidebar wiring.
+// Multi-selects use <details> for the disclosure pattern with live
+// checkboxes inside — mirrors Streamlit's st.multiselect UX.
 window.FILTERS = (() => {
   const state = {
     from: null, to: null,
@@ -14,7 +15,7 @@ window.FILTERS = (() => {
   function onChange(fn) { listeners.push(fn); }
 
   function setDefault(leads) {
-    if (state.from || state.to) return; // user already set something
+    if (state.from || state.to) return;
     const dates = leads.map(l => l.datestamp_d).filter(Boolean).sort((a, b) => a - b);
     if (dates.length) {
       const max = dates[dates.length - 1];
@@ -24,30 +25,78 @@ window.FILTERS = (() => {
     }
   }
 
-  function populateOptions(leads) {
-    const fillSelect = (id, vals) => {
-      const sel = document.getElementById(id);
-      sel.innerHTML = "";
-      for (const v of vals) {
-        const opt = document.createElement("option");
-        opt.value = v; opt.textContent = v;
-        sel.appendChild(opt);
-      }
-    };
-    const uniq = (key) => Array.from(new Set(
+  function uniq(leads, key) {
+    return Array.from(new Set(
       leads.map(l => l[key]).filter(v => v && String(v).trim())
     )).sort();
-    fillSelect("f-division", uniq("division"));
-    fillSelect("f-source",   uniq("source"));
-    fillSelect("f-leadtype", uniq("is_lead"));
+  }
+
+  function renderMulti(id, values, target) {
+    const list = document.querySelector(`.multi-list[data-target="${id}"]`);
+    list.innerHTML = "";
+    if (!values.length) {
+      list.innerHTML = '<div class="empty">no options</div>';
+      return;
+    }
+    for (const v of values) {
+      const lbl = document.createElement("label");
+      const cb = document.createElement("input");
+      cb.type = "checkbox"; cb.value = v; cb.checked = target.has(v);
+      cb.addEventListener("change", () => {
+        if (cb.checked) target.add(v); else target.delete(v);
+        updateSummary(id, target, values.length);
+        notify();
+      });
+      const txt = document.createElement("span");
+      txt.textContent = v;
+      lbl.appendChild(cb); lbl.appendChild(txt);
+      list.appendChild(lbl);
+    }
+    updateSummary(id, target, values.length);
+  }
+
+  function updateSummary(id, target, total) {
+    const $sum = document.querySelector(`#${id} summary .summary-value`);
+    if (!$sum) return;
+    if (target.size === 0) {
+      $sum.textContent = "All";
+      $sum.classList.remove("selected");
+    } else if (target.size === total) {
+      $sum.textContent = `All (${total})`;
+      $sum.classList.remove("selected");
+    } else if (target.size <= 2) {
+      $sum.textContent = Array.from(target).join(", ");
+      $sum.classList.add("selected");
+    } else {
+      $sum.textContent = `${target.size} selected`;
+      $sum.classList.add("selected");
+    }
+  }
+
+  function wireSearch(id) {
+    const $in = document.querySelector(`.multi-search[data-target="${id}"]`);
+    if (!$in) return;
+    $in.addEventListener("input", () => {
+      const q = $in.value.toLowerCase().trim();
+      const labels = document.querySelectorAll(`.multi-list[data-target="${id}"] label`);
+      for (const lbl of labels) {
+        const txt = lbl.querySelector("span").textContent.toLowerCase();
+        lbl.style.display = !q || txt.includes(q) ? "" : "none";
+      }
+    });
+  }
+
+  function populateOptions(leads) {
+    renderMulti("ms-division", uniq(leads, "division"), state.divisions);
+    renderMulti("ms-source",   uniq(leads, "source"),   state.sources);
+    renderMulti("ms-leadtype", uniq(leads, "is_lead"),  state.leadTypes);
+    wireSearch("ms-division");
+    wireSearch("ms-source");
   }
 
   function wireSidebar() {
     const $from = document.getElementById("f-from");
     const $to = document.getElementById("f-to");
-    const $div = document.getElementById("f-division");
-    const $src = document.getElementById("f-source");
-    const $type = document.getElementById("f-leadtype");
     const $nodeal = document.getElementById("f-nodeal");
     const $reset = document.getElementById("f-reset");
 
@@ -55,7 +104,10 @@ window.FILTERS = (() => {
     $from.value = fmt(state.from);
     $to.value = fmt(state.to);
 
-    $from.addEventListener("change", () => { state.from = $from.value ? new Date($from.value) : null; notify(); });
+    $from.addEventListener("change", () => {
+      state.from = $from.value ? new Date($from.value) : null;
+      notify();
+    });
     $to.addEventListener("change", () => {
       if ($to.value) {
         const d = new Date($to.value); d.setHours(23, 59, 59, 999);
@@ -63,23 +115,27 @@ window.FILTERS = (() => {
       } else state.to = null;
       notify();
     });
-    const wireMulti = (sel, target) => {
-      sel.addEventListener("change", () => {
-        target.clear();
-        for (const opt of sel.selectedOptions) target.add(opt.value);
-        notify();
-      });
-    };
-    wireMulti($div, state.divisions);
-    wireMulti($src, state.sources);
-    wireMulti($type, state.leadTypes);
-    $nodeal.addEventListener("change", () => { state.noDealOnly = $nodeal.checked; notify(); });
+    $nodeal.addEventListener("change", () => {
+      state.noDealOnly = $nodeal.checked; notify();
+    });
     $reset.addEventListener("click", () => {
       state.divisions.clear(); state.sources.clear(); state.leadTypes.clear();
       state.noDealOnly = false;
-      [$div, $src, $type].forEach(s => { for (const o of s.options) o.selected = false; });
       $nodeal.checked = false;
+      document.querySelectorAll(".multi-list input[type=checkbox]")
+        .forEach(cb => cb.checked = false);
+      ["ms-division", "ms-source", "ms-leadtype"].forEach(id => {
+        const $sum = document.querySelector(`#${id} summary .summary-value`);
+        if ($sum) { $sum.textContent = "All"; $sum.classList.remove("selected"); }
+      });
       notify();
+    });
+
+    // Click outside any open dropdown to close it.
+    document.addEventListener("click", (e) => {
+      document.querySelectorAll("details.multi[open]").forEach(d => {
+        if (!d.contains(e.target)) d.removeAttribute("open");
+      });
     });
   }
 

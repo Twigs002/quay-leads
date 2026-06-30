@@ -57,6 +57,8 @@ window.DATA = (() => {
   }
 
   // Paginated read — Supabase REST caps at 1000 rows per request.
+  // Loops until a page returns < PAGE OR exactly 0 rows (so a final full
+  // page that's also the last page exits cleanly on the next iteration).
   async function _allRows(table, select = "*") {
     const sb = client();
     const PAGE = 1000;
@@ -64,48 +66,32 @@ window.DATA = (() => {
     for (let from = 0; ; from += PAGE) {
       const { data, error } = await sb.from(table).select(select).range(from, from + PAGE - 1);
       if (error) throw error;
-      rows.push(...(data || []));
-      if (!data || data.length < PAGE) break;
+      if (!data || data.length === 0) break;
+      rows.push(...data);
+      if (data.length < PAGE) break;
     }
     return rows;
   }
 
   async function loadAll(force = false) {
     if (_cache && !force) return _cache;
-    const [leads, deals, status, actions] = await Promise.all([
-      _allRows("leads"),
-      _allRows("hs_deal_state"),
+    // ONE paginated query against the leads_enriched view (joins leads +
+    // hs_deal_state + latest lead_actions server-side). Down from 4
+    // parallel chains × ~12 round trips → 1 chain × ~12 round trips with
+    // joins already done.
+    const [enriched, status] = await Promise.all([
+      _allRows("leads_enriched"),
       _allRows("sync_status"),
-      _allRows("lead_actions"),
     ]);
-    const dealMap = new Map(deals.map(d => [String(d.deal_id), d]));
-    const noteMap = new Map();
-    for (const a of actions) {
-      const k = (a.email || "").toLowerCase();
-      const prev = noteMap.get(k);
-      if (!prev || (a.actioned_at || "") > (prev.actioned_at || "")) {
-        noteMap.set(k, a);
-      }
-    }
-    for (const l of leads) {
+    for (const l of enriched) {
       l.datestamp_d = l.datestamp ? new Date(l.datestamp) : null;
-      const d = l.deal_id ? dealMap.get(String(l.deal_id)) : null;
-      l.has_deal = !!l.deal_id;
-      l.action_flag = l.has_deal ? "Has Deal" : "Retry / Action Needed";
-      l.current_stage = d ? d.current_stage : null;
-      l.amount = d ? d.amount : null;
-      l.close_date = d ? d.close_date : null;
-      l.hs_last_modified = d ? d.hs_last_modified : null;
-      l.num_calls = d ? (d.num_calls || 0) : 0;
-      l.worked = l.num_calls > 0;
-      const note = noteMap.get((l.email || "").toLowerCase());
-      l.action_note = note ? note.note : null;
-      l.note_at = note ? note.actioned_at : null;
-      l.note_by = note ? note.actioned_by : null;
+      l.has_deal = !!l.has_deal;
+      l.worked = !!l.worked;
+      l.num_calls = l.num_calls || 0;
     }
     const syncMain = status.find(s => s.name === "leads_sync");
     _cache = {
-      leads,
+      leads: enriched,
       lastSync: syncMain ? syncMain.last_synced_at : null,
       syncOk: syncMain ? !!syncMain.ok : null,
       syncMessage: syncMain ? syncMain.message : null,

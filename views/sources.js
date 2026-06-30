@@ -2,6 +2,12 @@
 window.VIEWS = window.VIEWS || {};
 window.VIEWS.sources = function (root, ctx) {
   const leads = ctx.view.leads;
+  const { escapeHtml, trunc, emptyState } = UTILS;
+
+  if (!leads.length) {
+    root.innerHTML = `<h2>Sources</h2>${emptyState()}`;
+    return;
+  }
 
   // Quality table: total / seller / owner / qualified / quality%
   // (we don't have RawLeads here so we approximate from leads — only
@@ -113,17 +119,19 @@ window.VIEWS.sources = function (root, ctx) {
   const facetLayout = { ...THEME.PLOTLY_LAYOUT,
     grid: { rows: 2, columns: 3, pattern: "independent", roworder: "top to bottom" },
     annotations: top6.map((src, i) => ({
-      text: trunc(src, 24), showarrow: false,
-      x: 0.5, y: 1.08, xref: `x${i + 1} domain`, yref: `y${i + 1} domain`,
-      font: { size: 12, color: THEME.tokens.ink, weight: "bold" },
+      // Use HTML <b> in text — Plotly doesn't support font.weight as a key
+      text: `<b>${trunc(src, 24)}</b>`,
+      showarrow: false,
+      x: 0.5, y: 1.10, xref: `x${i + 1} domain`, yref: `y${i + 1} domain`,
+      font: { size: 12, color: THEME.tokens.ink },
     })),
-    margin: { l: 40, r: 16, t: 50, b: 40 },
+    margin: { l: 40, r: 16, t: 60, b: 40 },
   };
   // Cleaner axes for each facet
   for (let i = 0; i < top6.length; i++) {
     const ax = i === 0 ? "" : (i + 1);
-    facetLayout[`xaxis${ax}`] = { ...THEME.PLOTLY_LAYOUT.xaxis, nticks: 4 };
-    facetLayout[`yaxis${ax}`] = { ...THEME.PLOTLY_LAYOUT.yaxis };
+    facetLayout[`xaxis${ax}`] = { ...THEME.PLOTLY_LAYOUT.xaxis, nticks: 3, matches: null };
+    facetLayout[`yaxis${ax}`] = { ...THEME.PLOTLY_LAYOUT.yaxis, nticks: 3, matches: null };
   }
   Plotly.newPlot("per-source-chart", facetTraces, facetLayout, THEME.PLOTLY_CONFIG);
 };
@@ -133,8 +141,4 @@ function barCell(p, cls) {
   const w = Math.max(0, Math.min(100, p));
   return `<div class="bar ${cls}"><span style="width:${w}%"></span></div>
           <span class="muted small">${p.toFixed(1)}%</span>`;
-}
-function trunc(s, n) { return s && s.length > n ? s.slice(0, n - 1) + "…" : s; }
-function escapeHtml(s) {
-  return String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }

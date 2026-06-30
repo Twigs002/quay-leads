@@ -2,8 +2,9 @@
 window.VIEWS = window.VIEWS || {};
 window.VIEWS.pipeline = function (root, ctx) {
   const leads = ctx.view.leads;
+  const { escapeHtml, emptyState } = UTILS;
   if (!leads.length) {
-    root.innerHTML = `<h2>Pipeline</h2><p class="muted">No leads match the current filters.</p>`;
+    root.innerHTML = `<h2>Pipeline</h2>${emptyState()}`;
     return;
   }
 
@@ -202,7 +203,4 @@ function barCell(p) {
   const w = Math.max(0, Math.min(100, p));
   return `<div class="bar ${cls}"><span style="width:${w}%"></span></div>
           <span class="muted small">${p.toFixed(1)}%</span>`;
-}
-function escapeHtml(s) {
-  return String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }

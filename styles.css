@@ -49,54 +49,89 @@ body {
 }
 .hidden { display: none !important; }
 
-/* ── Login ────────────────────────────────────────────────────────── */
+/* ── Login (branded navy gradient, mirrors quay-dashboard-v2 .dash-login) ── */
 .login {
   min-height: 100vh;
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 24px;
+  background: linear-gradient(160deg, #34508F 0%, #27396B 70%, #1A2547 100%);
 }
 .login-card {
-  background: var(--card);
-  border: 1px solid var(--line);
+  background: rgba(255,255,255,0.07);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255,255,255,0.12);
   border-radius: var(--r-lg);
-  padding: 36px 32px;
+  padding: 40px 36px;
   width: 100%;
   max-width: 420px;
-  box-shadow: var(--shadow);
+  box-shadow: 0 24px 60px rgba(0,0,0,0.35);
+  color: #fff;
+}
+.login-card .brand-mark {
+  display: flex; align-items: center; gap: 12px;
+  margin-bottom: 18px;
+}
+.login-card .brand-mark .dot {
+  width: 14px; height: 14px; border-radius: 50%;
+  background: var(--yellow); box-shadow: 0 0 0 4px rgba(253,197,3,0.20);
+}
+.login-card .brand-mark .name {
+  font-weight: 800; font-size: 13px; letter-spacing: 0.04em;
+  text-transform: uppercase; color: rgba(255,255,255,0.8);
 }
 .login-card h1 {
-  font-size: 28px;
-  margin: 0 0 4px;
+  font-size: 30px;
+  margin: 0 0 6px;
   line-height: 1.1;
   font-weight: 800;
+  color: #fff;
 }
-.login-card h1 .thin { font-weight: 500; color: var(--slate); }
-.login-card p { color: var(--muted); margin: 8px 0 24px; }
+.login-card .sub {
+  font-size: 14px; color: rgba(255,255,255,0.65); margin: 0 0 28px;
+}
 .login-card form { display: flex; flex-direction: column; gap: 14px; }
 .login-card label {
   display: flex; flex-direction: column; gap: 6px;
-  font-size: 12px; font-weight: 600; color: var(--slate);
-  text-transform: uppercase; letter-spacing: 0.04em;
+  font-size: 11px; font-weight: 600;
+  color: rgba(255,255,255,0.7);
+  text-transform: uppercase; letter-spacing: 0.06em;
 }
 .login-card input {
-  padding: 11px 14px;
-  border: 1px solid var(--line);
+  padding: 12px 14px;
+  border: 1px solid rgba(255,255,255,0.15);
   border-radius: var(--r-sm);
   font-family: var(--sans);
   font-size: 15px;
-  background: var(--paper);
-  color: var(--ink);
+  background: rgba(0,0,0,0.25);
+  color: #fff;
 }
-.login-card input:focus { outline: 2px solid var(--sky); border-color: var(--sky-deep); }
+.login-card input::placeholder { color: rgba(255,255,255,0.35); }
+.login-card input:focus {
+  outline: 2px solid var(--yellow);
+  outline-offset: 1px;
+  border-color: var(--yellow);
+  background: rgba(0,0,0,0.35);
+}
+.login-card .btn-primary {
+  margin-top: 8px;
+  background: var(--yellow);
+  color: var(--ink);
+  border: 1px solid var(--yellow-deep);
+  padding: 12px;
+  font-size: 14px;
+  font-weight: 700;
+}
+.login-card .muted { color: rgba(255,255,255,0.55); }
 .error {
   margin-top: 8px;
   padding: 10px 14px;
-  background: #FBE2DD;
-  border: 1px solid rgba(210,10,3,0.2);
+  background: rgba(210,10,3,0.18);
+  border: 1px solid rgba(251,113,133,0.4);
   border-radius: var(--r-sm);
-  color: var(--red);
+  color: #FECACA;
   font-size: 13px;
 }
 
@@ -155,10 +190,12 @@ body {
   font-size: 13px;
   transition: all 0.15s;
 }
-.tabs a:hover { background: var(--paper); color: var(--ink); }
+.tabs a:hover { color: var(--ink); }
 .tabs a.active {
-  background: var(--ink);
-  color: #fff;
+  background: transparent;
+  color: var(--ink);
+  box-shadow: inset 0 -2px 0 var(--yellow);
+  border-radius: 0;
 }
 .user-chip { display: flex; align-items: center; gap: 12px; }
 .user-chip .muted { font-size: 12px; }
@@ -188,10 +225,9 @@ body {
 .filter-group { display: flex; flex-direction: column; gap: 8px; }
 .filter-group label {
   display: flex; flex-direction: column; gap: 4px;
-  font-size: 11px; font-weight: 600; color: var(--slate);
-  text-transform: uppercase; letter-spacing: 0.04em;
+  font-size: 12px; font-weight: 500; color: var(--slate);
 }
-.filter-group label.row { flex-direction: row; align-items: center; gap: 6px; text-transform: none; font-size: 13px; }
+.filter-group label.row { flex-direction: row; align-items: center; gap: 6px; font-size: 13px; }
 .filter-group input[type=date],
 .filter-group select {
   padding: 7px 10px;
@@ -221,8 +257,7 @@ details.multi summary {
 }
 details.multi summary::-webkit-details-marker { display: none; }
 details.multi summary .label {
-  font-size: 11px; font-weight: 600; color: var(--slate);
-  text-transform: uppercase; letter-spacing: 0.04em;
+  font-size: 12px; font-weight: 500; color: var(--slate);
 }
 details.multi summary .summary-value {
   flex: 1; color: var(--ink); font-weight: 500;
@@ -286,7 +321,9 @@ details.multi[open] summary {
   font-size: 11px !important;
   font-weight: 600;
   border-radius: 6px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 5px;
 }
+.refresh-btn svg { flex-shrink: 0; }
 
 /* tiny toast for sync triggers */
 .toast {
@@ -305,6 +342,56 @@ details.multi[open] summary {
 .toast .toast-title { font-weight: 700; margin-bottom: 4px; }
 .toast a { color: var(--yellow); text-decoration: underline; }
 .small { font-size: 11px; }
+
+/* ── Focus rings (keyboard a11y) ───────────────────────────────────── */
+.btn-primary:focus-visible,
+.btn-ghost:focus-visible,
+.tabs a:focus-visible,
+details.multi summary:focus-visible,
+.multi-search:focus-visible,
+.multi-list label:focus-visible,
+.filter-group input:focus-visible,
+.filter-group input[type=date]:focus-visible,
+.search:focus-visible,
+table.dt tbody tr:focus-visible,
+.note-input:focus-visible {
+  outline: 2px solid var(--sky-deep);
+  outline-offset: 2px;
+}
+
+/* ── Empty states ──────────────────────────────────────────────────── */
+.empty-state {
+  background: var(--card);
+  border: 1px dashed var(--line);
+  border-radius: var(--r);
+  padding: 48px 24px;
+  text-align: center;
+  color: var(--muted);
+}
+.empty-state-icon {
+  font-size: 32px;
+  color: var(--line);
+  margin-bottom: 8px;
+  font-weight: 300;
+}
+.empty-state p { margin: 8px 0 16px; }
+
+/* ── Inline note input (Action Tracker autosave) ──────────────────── */
+.note-input {
+  width: 240px;
+  padding: 5px 9px;
+  font-family: var(--sans);
+  font-size: 13px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--paper);
+  color: var(--ink);
+  transition: border-color 0.15s, background 0.3s;
+}
+.note-input:focus { outline: none; border-color: var(--sky-deep); background: var(--card); }
+.note-input.saving  { border-color: var(--amber); background: #FBF1D2; }
+.note-input.saved   { border-color: var(--green); background: #E2F1EA; }
+.note-input.error   { border-color: var(--red); background: #FBE2DD; }
 
 .view {
   flex: 1;
@@ -352,8 +439,25 @@ details.multi[open] summary {
   font-size: 24px;
   font-weight: 800;
   color: var(--ink);
+  line-height: 1.1;
 }
-.kpi .delta { font-size: 12px; color: var(--yellow-deep); }
+.kpi .delta-row { margin-top: 6px; font-size: 11px; }
+.kpi .delta {
+  display: inline-block;
+  font-size: 11px; font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+.kpi .delta.up    { color: var(--green);       background: #E2F1EA; }
+.kpi .delta.down  { color: var(--red);         background: #FBE2DD; }
+.kpi .delta.flat  { color: var(--muted);       background: var(--paper); }
+.kpi .spark { margin-top: 8px; height: 36px; }
+.kpi .delta:not(.up):not(.down):not(.flat) {
+  /* Plain percentage like "53.0%" (no comparison) — uses default brand colour */
+  background: transparent;
+  color: var(--yellow-deep);
+  padding: 0;
+}
 
 /* ── Charts / cards ───────────────────────────────────────────────── */
 .card {

@@ -2,7 +2,13 @@
 window.VIEWS = window.VIEWS || {};
 window.VIEWS["raw-data"] = function (root, ctx) {
   const all = ctx.view.leads;
+  const { escapeHtml, escapeAttr, fmtDate, fmtShortDate, emptyState } = UTILS;
   let q = "";
+
+  if (!all.length) {
+    root.innerHTML = `<h2>Raw Data</h2>${emptyState()}`;
+    return;
+  }
 
   function render() {
     const work = filtered();
@@ -102,17 +108,3 @@ function csvCell(v) {
   const s = String(v);
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
-function fmtDate(s) {
-  if (!s) return "";
-  const d = new Date(s);
-  return isNaN(d) ? "" : d.toISOString().slice(0, 16).replace("T", " ");
-}
-function fmtShortDate(s) {
-  if (!s) return "";
-  const d = new Date(s);
-  return isNaN(d) ? "" : d.toISOString().slice(0, 10);
-}
-function escapeHtml(s) {
-  return String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-}
-function escapeAttr(s) { return escapeHtml(s).replace(/"/g, "&quot;"); }

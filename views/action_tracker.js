@@ -1,8 +1,10 @@
 // Action Tracker — filterable list of leads with editable notes.
 // "Worked" is derived from HubSpot (read-only). This page is for notes.
+// Notes autosave on blur / Enter — no per-row Save button, no page reload.
 window.VIEWS = window.VIEWS || {};
 window.VIEWS["action-tracker"] = function (root, ctx) {
   const all = ctx.view.leads;
+  const { escapeHtml, escapeAttr, fmtDate } = UTILS;
   let showAll = false;
 
   function visible() {
@@ -15,6 +17,11 @@ window.VIEWS["action-tracker"] = function (root, ctx) {
     const work = visible();
     const worked = work.filter(l => l.worked).length;
     const outstanding = work.length - worked;
+
+    if (!all.length) {
+      root.innerHTML = `<h2>Action Tracker</h2>${UTILS.emptyState()}`;
+      return;
+    }
 
     root.innerHTML = `
       <h2>Action Tracker</h2>
@@ -31,6 +38,8 @@ window.VIEWS["action-tracker"] = function (root, ctx) {
 
       <p><strong>${work.length.toLocaleString()}</strong> leads · <strong>${worked.toLocaleString()}</strong> already worked · <strong>${outstanding.toLocaleString()}</strong> outstanding</p>
 
+      <p class="muted small">Notes save automatically when you leave the field or press Enter.</p>
+
       <div class="table-wrap">
         <table class="dt">
           <thead><tr>
@@ -46,9 +55,8 @@ window.VIEWS["action-tracker"] = function (root, ctx) {
             <th class="num">Calls</th>
             <th>Worked</th>
             <th>Note</th>
-            <th></th>
           </tr></thead>
-          <tbody>${work.slice(0, 500).map(l => row(l)).join("")}</tbody>
+          <tbody>${work.slice(0, 500).map(row).join("")}</tbody>
         </table>
       </div>
       ${work.length > 500 ? `<p class="muted small" style="margin-top:8px;">Showing first 500 of ${work.length.toLocaleString()}. Refine filters to narrow.</p>` : ""}
@@ -62,38 +70,51 @@ window.VIEWS["action-tracker"] = function (root, ctx) {
       render();
     });
 
-    root.querySelectorAll(".note-save").forEach(btn => {
-      btn.addEventListener("click", async () => {
-        const email = btn.dataset.email;
-        const input = root.querySelector(`input.note-input[data-email="${cssEscape(email)}"]`);
+    // Autosave on blur or Enter — no Save button needed.
+    root.querySelectorAll("input.note-input").forEach(input => {
+      const original = input.value;
+      const save = async () => {
         const text = (input.value || "").trim();
-        if (!text) return;
-        btn.disabled = true;
-        btn.textContent = "Saving…";
+        if (text === (original || "").trim()) return; // unchanged
+        input.classList.add("saving");
         try {
-          await DATA.addNote(email, text, ctx.user.username);
-          btn.textContent = "Saved ✓";
-          input.value = "";
-          // refresh cache then re-render via hashchange trick
-          DATA.invalidate();
-          setTimeout(() => location.reload(), 700);
+          await DATA.addNote(input.dataset.email, text, ctx.user.username);
+          input.classList.remove("saving");
+          input.classList.add("saved");
+          // Mutate the in-memory cache so the row reflects the new note
+          // without a page reload.
+          const lead = ctx.cache.leads.find(l => (l.email || "").toLowerCase() === input.dataset.email.toLowerCase());
+          if (lead) {
+            lead.action_note = text;
+            lead.note_at = new Date().toISOString();
+            lead.note_by = ctx.user.username;
+          }
+          setTimeout(() => input.classList.remove("saved"), 1500);
+          renderRecent();
         } catch (e) {
-          btn.disabled = false;
-          btn.textContent = "Save";
-          alert("Failed to save: " + (e.message || e));
+          input.classList.remove("saving");
+          input.classList.add("error");
+          input.title = "Failed to save: " + (e.message || e);
         }
+      };
+      input.addEventListener("blur", save);
+      input.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") { e.preventDefault(); input.blur(); }
+        if (e.key === "Escape") { input.value = original; input.blur(); }
       });
     });
 
     renderRecent();
   }
 
-  async function renderRecent() {
+  function renderRecent() {
     const recent = ctx.cache.leads
       .filter(l => l.note_at)
       .sort((a, b) => (b.note_at || "").localeCompare(a.note_at || ""))
       .slice(0, 30);
-    document.getElementById("recent-notes").innerHTML = recent.length === 0
+    const el = document.getElementById("recent-notes");
+    if (!el) return;
+    el.innerHTML = recent.length === 0
       ? '<p class="muted">No notes yet.</p>'
       : `<div class="table-wrap"><table class="dt">
           <thead><tr><th>When</th><th>Who</th><th>Lead</th><th>Note</th></tr></thead>
@@ -117,22 +138,10 @@ window.VIEWS["action-tracker"] = function (root, ctx) {
       <td>${escapeHtml(l.is_lead || "")}</td>
       <td>${escapeHtml(l.current_stage || "")}</td>
       <td class="num">${l.num_calls || 0}</td>
-      <td>${l.worked ? "✅" : ""}</td>
-      <td><input class="note-input" type="text" placeholder="add note…" data-email="${escapeAttr(l.email)}" value="${escapeAttr(l.action_note || "")}" style="width: 220px; padding: 4px 8px; font-family: var(--sans); border: 1px solid var(--line); border-radius: 6px;"></td>
-      <td><button class="btn-ghost note-save" data-email="${escapeAttr(l.email)}" style="padding: 4px 10px;">Save</button></td>
+      <td>${l.worked ? '<span class="pill green">Worked</span>' : ''}</td>
+      <td><input class="note-input" type="text" placeholder="add note, Enter to save…" data-email="${escapeAttr(l.email)}" value="${escapeAttr(l.action_note || "")}"></td>
     </tr>`;
   }
 
   render();
 };
-
-function fmtDate(s) {
-  if (!s) return "";
-  const d = new Date(s);
-  return isNaN(d) ? "" : d.toISOString().slice(0, 16).replace("T", " ");
-}
-function escapeHtml(s) {
-  return String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-}
-function escapeAttr(s) { return escapeHtml(s).replace(/"/g, "&quot;"); }
-function cssEscape(s) { return String(s).replace(/(["\\])/g, "\\$1"); }

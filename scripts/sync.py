@@ -31,6 +31,7 @@ import time
 import traceback
 from datetime import datetime, timezone
 from typing import Iterable
+from zoneinfo import ZoneInfo
 
 import gspread
 import requests
@@ -167,17 +168,24 @@ def fetch_sheet_leads(sheet_id: str) -> list[dict]:
     return out
 
 
+# Quay 1 operates in South Africa — sheet timestamps are SAST (UTC+2, no DST).
+# Naive parses must be tagged SAST and converted to UTC, NOT stamped UTC.
+SAST = ZoneInfo("Africa/Johannesburg")
+
+
 def _parse_dt_dayfirst(v):
     """Accept 'dd/mm/yyyy hh:mm:ss' (sheet's default), ISO, or already a dt."""
     if v in (None, ""):
         return None
     if isinstance(v, datetime):
-        return v.isoformat()
+        if v.tzinfo is None:
+            v = v.replace(tzinfo=SAST)
+        return v.astimezone(timezone.utc).isoformat()
     s = str(v).strip()
     for fmt in ("%d/%m/%Y %H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d"):
         try:
             dt = datetime.strptime(s, fmt)
-            return dt.replace(tzinfo=timezone.utc).isoformat()
+            return dt.replace(tzinfo=SAST).astimezone(timezone.utc).isoformat()
         except ValueError:
             continue
     return None
@@ -195,13 +203,22 @@ def fetch_stage_labels(sess: requests.Session) -> dict[str, str]:
     return out
 
 
-def fetch_deals(sess: requests.Session, deal_ids: Iterable[str]) -> list[dict]:
+def fetch_deals(sess: requests.Session, deal_ids: Iterable[str]) -> tuple[list[dict], set[str]]:
+    """Return (rows, failed_ids).
+
+    failed_ids = deal_ids that belonged to a batch whose HubSpot call errored
+    out (5xx, network, retry-exhausted). The caller MUST exclude these from
+    the upsert so the existing Supabase rows are preserved instead of being
+    overwritten with empty placeholders.
+    """
     out: list[dict] = []
+    failed: set[str] = set()
     for chunk in chunks(deal_ids, BATCH):
         body = {"properties": HS_PROPS, "inputs": [{"id": d} for d in chunk]}
         try:
             data = hs_request(sess, "POST", f"{HS_API}/crm/v3/objects/deals/batch/read", json=body)
         except RuntimeError:
+            failed.update(str(d) for d in chunk)
             continue
         for rec in (data or {}).get("results", []):
             p = rec.get("properties") or {}
@@ -216,24 +233,30 @@ def fetch_deals(sess: requests.Session, deal_ids: Iterable[str]) -> list[dict]:
                 "pipeline":          p.get("pipeline"),
                 "probability":       _to_float(p.get("hs_deal_stage_probability")),
             })
-    return out
+    return out, failed
 
 
-def fetch_call_counts(sess: requests.Session, deal_ids: Iterable[str]) -> dict[str, int]:
+def fetch_call_counts(sess: requests.Session, deal_ids: Iterable[str]) -> tuple[dict[str, int], set[str]]:
+    """Return ({deal_id: count}, failed_ids). Same contract as fetch_deals:
+    failed batches must not overwrite known-good num_calls."""
     out: dict[str, int] = {}
+    failed: set[str] = set()
     for chunk in chunks(deal_ids, BATCH):
         body = {"inputs": [{"id": d} for d in chunk]}
         try:
             data = hs_request(sess, "POST", f"{HS_API}/crm/v4/associations/deals/calls/batch/read", json=body)
         except RuntimeError:
+            failed.update(str(d) for d in chunk)
             continue
         for rec in (data or {}).get("results", []):
             did = (rec.get("from") or {}).get("id")
             if did:
                 out[str(did)] = len(rec.get("to") or [])
+        # Only zero-out IDs that came from SUCCESSFUL batches and weren't returned.
+        # (Failed-batch IDs stay absent from `out` so the upsert skips them.)
         for d in chunk:
             out.setdefault(str(d), 0)
-    return out
+    return out, failed
 
 
 def _to_float(v):
@@ -279,24 +302,40 @@ def main():
 
         print("→ fetching deal stages + call counts from HubSpot")
         labels = fetch_stage_labels(sess)
-        deals = fetch_deals(sess, deal_ids)
-        calls = fetch_call_counts(sess, deal_ids)
+        deals, deals_failed = fetch_deals(sess, deal_ids)
+        calls, calls_failed = fetch_call_counts(sess, deal_ids)
+        # IDs that belonged to a failed batch on EITHER side are excluded —
+        # never overwrite real Supabase rows with placeholders on transient errors.
+        failed_ids = deals_failed | calls_failed
+        if failed_ids:
+            print(f"  ! {len(failed_ids):,} deal_ids in failed batches — skipping (preserving existing rows)")
+
         # Merge call counts + readable stage labels
-        deal_rows = []
+        deal_rows: list[dict] = []
         for d in deals:
+            did = str(d.get("deal_id") or "")
+            if not did or did in failed_ids:
+                continue
             sid = d.get("current_stage_id")
             d["current_stage"] = labels.get(sid, sid)
-            d["num_calls"] = calls.get(str(d["deal_id"]), 0)
+            d["num_calls"] = calls.get(did, 0)
             d["refreshed_at"] = datetime.now(timezone.utc).isoformat()
             deal_rows.append(d)
-        # Include deal_ids that came back empty (deleted in HubSpot) as 0-call placeholders
-        seen = {d["deal_id"] for d in deal_rows}
+
+        # Placeholder rows ONLY for IDs that came back empty from a SUCCESSFUL
+        # batch (deal deleted in HubSpot). Failed-batch IDs are excluded.
+        seen = {str(d["deal_id"]) for d in deal_rows}
         for did in deal_ids:
-            if did not in seen:
-                deal_rows.append({
-                    "deal_id": did, "num_calls": calls.get(did, 0),
-                    "refreshed_at": datetime.now(timezone.utc).isoformat(),
-                })
+            did = str(did)
+            if did in failed_ids or did in seen:
+                continue
+            if did not in calls:  # only "missing" if we never even got a call-count answer
+                continue
+            deal_rows.append({
+                "deal_id": did, "num_calls": calls.get(did, 0),
+                "refreshed_at": datetime.now(timezone.utc).isoformat(),
+            })
+
         # Dedupe by deal_id — HubSpot occasionally returns >1 record for the
         # same input (merged deals, archived aliases). Last write wins.
         by_id: dict[str, dict] = {}

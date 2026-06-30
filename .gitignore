@@ -23,6 +23,9 @@ venv/
 .mypy_cache/
 .ruff_cache/
 
+## Supabase CLI scratch
+supabase/.temp/
+
 ## OS / editor
 .DS_Store
 .idea/

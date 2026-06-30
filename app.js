@@ -78,17 +78,39 @@
     const $reload = document.getElementById("reload-data");
     if (!$refresh || !$reload) return;
 
-    $refresh.addEventListener("click", () => {
-      // Opens the workflow_dispatch page. User clicks "Run workflow" there.
-      // Sync takes ~90 sec. We show a toast that explains, then auto-reload
-      // after 2 min so the freshest data is in view.
-      window.open("https://github.com/Twigs002/quay-leads/actions/workflows/sync.yml", "_blank", "noopener");
-      toast({
-        title: "Trigger a sync",
-        body: 'A new tab opened with the sync workflow. Click <strong>Run workflow → Run workflow</strong>. This page will auto-reload in 2 min.',
-        ms: 8000,
-      });
-      setTimeout(() => location.reload(), 120000);
+    $refresh.addEventListener("click", async () => {
+      $refresh.disabled = true;
+      const originalLabel = $refresh.textContent;
+      $refresh.textContent = "↻ Queuing…";
+      try {
+        const res = await DATA.triggerSync();
+        toast({
+          title: "Sync queued ✓",
+          body: `Triggered by <strong>${escapeHtml(res.triggered_by_name || res.triggered_by || "you")}</strong>. ` +
+                `New data will land in ~90 sec — page will auto-reload then. ` +
+                `<a href="${res.run_url}" target="_blank" rel="noopener">Watch on GitHub →</a>`,
+          ms: 10000,
+        });
+        $refresh.textContent = "↻ Syncing… 90s";
+        setTimeout(() => location.reload(), 105000);
+      } catch (e) {
+        const msg = (e && e.message) || String(e);
+        // Fallback: if the Edge Function isn't deployed yet, open GH directly.
+        if (msg.includes("404") || msg.toLowerCase().includes("not found") || msg.toLowerCase().includes("failed to fetch")) {
+          window.open("https://github.com/Twigs002/quay-leads/actions/workflows/sync.yml", "_blank", "noopener");
+          toast({
+            title: "Edge Function not deployed",
+            body: "Opened GitHub Actions in a new tab — click <strong>Run workflow</strong> to start a sync. (Deploy the trigger-sync function for one-click sync.)",
+            ms: 8000,
+          });
+          $refresh.textContent = originalLabel;
+          $refresh.disabled = false;
+          return;
+        }
+        toast({ title: "Could not trigger sync", body: escapeHtml(msg), ms: 6000 });
+        $refresh.textContent = originalLabel;
+        $refresh.disabled = false;
+      }
     });
 
     $reload.addEventListener("click", async () => {

@@ -126,5 +126,24 @@ window.DATA = (() => {
     invalidate();
   }
 
-  return { client, signIn, signOut, getSession, loadAll, invalidate, addNote };
+  // One-click sync trigger via the trigger-sync Edge Function.
+  async function triggerSync() {
+    const sb = client();
+    const { data: { session } } = await sb.auth.getSession();
+    if (!session) throw new Error("Not signed in");
+    const res = await fetch(`${QUAY.SUPABASE_URL}/functions/v1/trigger-sync`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${session.access_token}`,
+        "Content-Type": "application/json",
+        "apikey": QUAY.SUPABASE_ANON_KEY,
+      },
+      body: "{}",
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+    return body;
+  }
+
+  return { client, signIn, signOut, getSession, loadAll, invalidate, addNote, triggerSync };
 })();

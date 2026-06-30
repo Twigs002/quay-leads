@@ -297,6 +297,13 @@ def main():
                     "deal_id": did, "num_calls": calls.get(did, 0),
                     "refreshed_at": datetime.now(timezone.utc).isoformat(),
                 })
+        # Dedupe by deal_id — HubSpot occasionally returns >1 record for the
+        # same input (merged deals, archived aliases). Last write wins.
+        by_id: dict[str, dict] = {}
+        for d in deal_rows:
+            if d.get("deal_id"):
+                by_id[str(d["deal_id"])] = d
+        deal_rows = list(by_id.values())
         print(f"  deal rows: {len(deal_rows):,}")
 
         print("→ upserting leads")

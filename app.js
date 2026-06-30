@@ -65,9 +65,57 @@
     FILTERS.wireSidebar();
     FILTERS.onChange(() => router(user, cache));
 
+    // Refresh / reload buttons
+    wireRefresh();
+
     // Router
     window.addEventListener("hashchange", () => router(user, cache));
     router(user, cache);
+  }
+
+  function wireRefresh() {
+    const $refresh = document.getElementById("refresh-now");
+    const $reload = document.getElementById("reload-data");
+    if (!$refresh || !$reload) return;
+
+    $refresh.addEventListener("click", () => {
+      // Opens the workflow_dispatch page. User clicks "Run workflow" there.
+      // Sync takes ~90 sec. We show a toast that explains, then auto-reload
+      // after 2 min so the freshest data is in view.
+      window.open("https://github.com/Twigs002/quay-leads/actions/workflows/sync.yml", "_blank", "noopener");
+      toast({
+        title: "Trigger a sync",
+        body: 'A new tab opened with the sync workflow. Click <strong>Run workflow → Run workflow</strong>. This page will auto-reload in 2 min.',
+        ms: 8000,
+      });
+      setTimeout(() => location.reload(), 120000);
+    });
+
+    $reload.addEventListener("click", async () => {
+      $reload.disabled = true;
+      $reload.textContent = "⟳ Loading…";
+      DATA.invalidate();
+      try {
+        await DATA.loadAll(true);
+        location.reload();
+      } catch (e) {
+        toast({ title: "Reload failed", body: escapeHtml(e.message || String(e)), ms: 6000 });
+        $reload.disabled = false;
+        $reload.textContent = "⟳ Reload";
+      }
+    });
+  }
+
+  function toast({ title, body, ms = 5000 }) {
+    const t = document.createElement("div");
+    t.className = "toast";
+    t.innerHTML = `<div class="toast-title">${title}</div><div>${body}</div>`;
+    document.body.appendChild(t);
+    requestAnimationFrame(() => t.classList.add("show"));
+    setTimeout(() => {
+      t.classList.remove("show");
+      setTimeout(() => t.remove(), 300);
+    }, ms);
   }
 
   function router(user, cache) {

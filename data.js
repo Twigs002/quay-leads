@@ -79,9 +79,10 @@ window.DATA = (() => {
     // hs_deal_state + latest lead_actions server-side). Down from 4
     // parallel chains × ~12 round trips → 1 chain × ~12 round trips with
     // joins already done.
-    const [enriched, status] = await Promise.all([
+    const [enriched, status, teamActivity] = await Promise.all([
       _allRows("leads_enriched"),
       _allRows("sync_status"),
+      _allRows("team_activity_daily"),
     ]);
     for (const l of enriched) {
       l.datestamp_d = l.datestamp ? new Date(l.datestamp) : null;
@@ -90,11 +91,15 @@ window.DATA = (() => {
       l.num_calls = l.num_calls || 0;
     }
     const syncMain = status.find(s => s.name === "leads_sync");
+    const syncTeam = status.find(s => s.name === "team_activity_sync");
     _cache = {
       leads: enriched,
+      teamActivity: teamActivity || [],
       lastSync: syncMain ? syncMain.last_synced_at : null,
       syncOk: syncMain ? !!syncMain.ok : null,
       syncMessage: syncMain ? syncMain.message : null,
+      lastTeamSync: syncTeam ? syncTeam.last_synced_at : null,
+      teamSyncOk: syncTeam ? !!syncTeam.ok : null,
     };
     return _cache;
   }

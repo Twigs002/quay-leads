@@ -11,6 +11,10 @@ on:
         description: 'Why are you triggering a manual sync?'
         required: false
         default: 'on demand'
+      backfill_days:
+        description: 'team_activity backfill window (default 3; use 45 for first run)'
+        required: false
+        default: '3'
 
 concurrency:
   group: sync
@@ -19,7 +23,7 @@ concurrency:
 jobs:
   sync:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -30,7 +34,7 @@ jobs:
         working-directory: scripts
         run: pip install -r requirements.txt
 
-      - name: Run sync
+      - name: Run leads sync
         working-directory: scripts
         env:
           HUBSPOT_TOKEN:        ${{ secrets.HUBSPOT_TOKEN }}
@@ -38,3 +42,11 @@ jobs:
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           GCP_SA_JSON:          ${{ secrets.GCP_SA_JSON }}
         run: python3 sync.py
+
+      - name: Run team-activity sync
+        working-directory: scripts
+        env:
+          HUBSPOT_TOKEN:        ${{ secrets.HUBSPOT_TOKEN }}
+          SUPABASE_URL:         https://dqszbqiimbfvmmnpgpsb.supabase.co
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: python3 team_activity_sync.py --days ${{ github.event.inputs.backfill_days || '3' }}

@@ -528,6 +528,32 @@ table.dt td.num, table.dt th.num { text-align: right; font-variant-numeric: tabu
 .pill.amber { color: var(--yellow-deep); background: #FBF1D2; border-color: rgba(185,138,2,0.30); }
 .pill.red   { color: var(--red); background: #FBE2DD; border-color: rgba(210,10,3,0.25); }
 
+/* ── Segmented control ─────────────────────────────────────────────── */
+.segmented {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--card);
+}
+.segmented .team-window-btn {
+  border: 0;
+  background: transparent;
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--slate);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.segmented .team-window-btn + .team-window-btn { border-left: 1px solid var(--line); }
+.segmented .team-window-btn:hover { background: var(--paper); }
+.segmented .team-window-btn.active { background: var(--ink); color: #FFF; }
+.segmented .team-window-btn:focus-visible {
+  outline: 2px solid var(--yellow);
+  outline-offset: -2px;
+}
+
 .muted { color: var(--muted); }
 .loading { padding: 40px; color: var(--muted); text-align: center; }
 .error-box {

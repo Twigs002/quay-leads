@@ -44,6 +44,9 @@ from supabase import Client, create_client
 HS_API = "https://api.hubapi.com"
 THROTTLE_S = 0.35
 BATCH = 100
+# HubSpot's contacts batch/read caps propertiesWithHistory requests at 50
+# per call (400 VALIDATION_ERROR at >50). Plain batch/read is still 100.
+HISTORY_BATCH = 50
 
 DIALFIRE_SID = "811260"
 N8N_SID = "223580"
@@ -187,9 +190,12 @@ def deal_to_contact_map(sess: requests.Session, deal_ids: list[str]) -> dict[str
 
 def contact_lead_status_history(sess: requests.Session, contact_ids: list[str]) -> dict[str, list[dict]]:
     """{contact_id: [{value, timestamp, sourceType, sourceId}, …]}. Returns
-    the raw history array (newest first, per HubSpot convention)."""
+    the raw history array (newest first, per HubSpot convention).
+
+    Uses HISTORY_BATCH (50) — HubSpot rejects propertiesWithHistory batches
+    of 51+ with a 400 VALIDATION_ERROR."""
     out: dict[str, list[dict]] = {}
-    for chunk in chunks(contact_ids, BATCH):
+    for chunk in chunks(contact_ids, HISTORY_BATCH):
         body = {
             "inputs": [{"id": c} for c in chunk],
             "propertiesWithHistory": ["hs_lead_status"],

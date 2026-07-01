@@ -48,6 +48,9 @@ BATCH = 100
 DIALFIRE_SID = "811260"
 N8N_SID = "223580"
 
+# LEAD-like status values that trigger n8n's deal-creation workflow.
+LEAD_LIKE = {"LEAD", "RENTAL_LEAD", "WHATSAPP_LEAD", "WHATSAPP_RENTAL_LEAD", "INBOUND_LEAD"}
+
 
 # ── Auth ────────────────────────────────────────────────────────────────
 def _need(name: str) -> str:
@@ -152,14 +155,68 @@ def deals_for_day(sess: requests.Session, day: date) -> list[dict]:
     return search_all(sess, "deals", body)
 
 
-def classify_deal(props: dict) -> str:
+def classify_deal_direct(props: dict) -> str | None:
+    """Bucket a deal by its own source props alone. Returns None for
+    n8n-created deals — those need contact-history lookup to attribute
+    correctly (n8n fires whenever hs_lead_status becomes LEAD, regardless
+    of who set it — DialFire OR a human in the HubSpot UI)."""
     src = (props.get("hs_object_source") or "").upper()
     sid = str(props.get("hs_object_source_id") or "")
     if src == "INTEGRATION" and sid == DIALFIRE_SID:
         return "dialfire"
     if src == "INTEGRATION" and sid == N8N_SID:
-        # n8n creates deals downstream of DialFire flagging a contact.
-        # Bucket them as DialFire-originated.
+        return None  # defer: needs contact-history lookup
+    if src == "CRM_UI":
+        return "team"
+    return "other"
+
+
+def deal_to_contact_map(sess: requests.Session, deal_ids: list[str]) -> dict[str, str]:
+    """{deal_id: first_associated_contact_id}."""
+    out: dict[str, str] = {}
+    for chunk in chunks(deal_ids, BATCH):
+        body = {"inputs": [{"id": d} for d in chunk]}
+        data = hs_request(sess, "POST", f"{HS_API}/crm/v4/associations/deals/contacts/batch/read", json=body)
+        for rec in data.get("results") or []:
+            did = (rec.get("from") or {}).get("id")
+            tos = rec.get("to") or []
+            if did and tos:
+                out[str(did)] = str(tos[0].get("toObjectId"))
+    return out
+
+
+def contact_lead_status_history(sess: requests.Session, contact_ids: list[str]) -> dict[str, list[dict]]:
+    """{contact_id: [{value, timestamp, sourceType, sourceId}, …]}. Returns
+    the raw history array (newest first, per HubSpot convention)."""
+    out: dict[str, list[dict]] = {}
+    for chunk in chunks(contact_ids, BATCH):
+        body = {
+            "inputs": [{"id": c} for c in chunk],
+            "propertiesWithHistory": ["hs_lead_status"],
+        }
+        data = hs_request(sess, "POST", f"{HS_API}/crm/v3/objects/contacts/batch/read", json=body)
+        for rec in data.get("results") or []:
+            hist = (rec.get("propertiesWithHistory") or {}).get("hs_lead_status") or []
+            out[str(rec["id"])] = hist
+    return out
+
+
+def attribute_n8n_deal(hist: list[dict], deal_createdate: str) -> str:
+    """Given a contact's hs_lead_status history and the n8n deal's create
+    time, find the latest LEAD-like event AT OR BEFORE createdate and
+    bucket by that event's sourceId.
+
+    Falls back to the latest LEAD event overall if none precede createdate
+    (rare — clock skew between HubSpot's own timestamps)."""
+    lead_events = [h for h in hist if (h.get("value") or "") in LEAD_LIKE]
+    if not lead_events:
+        return "other"
+    before = [h for h in lead_events if (h.get("timestamp") or "") <= (deal_createdate or "")]
+    pool = before or lead_events
+    latest = max(pool, key=lambda h: h.get("timestamp") or "")
+    src = (latest.get("sourceType") or "").upper()
+    sid = str(latest.get("sourceId") or "")
+    if src == "INTEGRATION" and sid == DIALFIRE_SID:
         return "dialfire"
     if src == "CRM_UI":
         return "team"
@@ -229,23 +286,50 @@ def classify_call_source(props: dict) -> str:
 
 # ── Main sync loop ──────────────────────────────────────────────────────
 def sync_day(sess: requests.Session, owner_team: dict[str, str], day: date,
-             contact_owner_cache: dict[str, str]) -> dict[str, dict]:
+             contact_owner_cache: dict[str, str],
+             lead_history_cache: dict[str, list[dict]]) -> dict[str, dict]:
     """Return {team: {calls_dialfire, calls_team, deals_dialfire, deals_team, deals_other}}."""
     result: dict[str, dict] = collections.defaultdict(lambda: {
         "calls_dialfire": 0, "calls_team": 0,
         "deals_dialfire": 0, "deals_team": 0, "deals_other": 0,
     })
 
-    # Deals
+    # Deals — direct-classify first; defer n8n deals for contact-history lookup
     deals = deals_for_day(sess, day)
+    deferred: list[tuple[str, str, str]] = []  # (deal_id, team, createdate)
     for d in deals:
         props = d.get("properties") or {}
         owner_id = str(props.get("hubspot_owner_id") or "")
         team = owner_team.get(owner_id)
         if not team:
             continue
-        origin = classify_deal(props)
-        result[team][f"deals_{origin}"] += 1
+        origin = classify_deal_direct(props)
+        if origin is None:
+            deferred.append((d["id"], team, props.get("createdate") or ""))
+        else:
+            result[team][f"deals_{origin}"] += 1
+
+    # Attribute n8n deals via the contact's hs_lead_status history — n8n
+    # fires on ANY human/system setting LEAD, so the deal-level source
+    # (223580) lies about who really originated the lead.
+    if deferred:
+        deal_ids = [x[0] for x in deferred]
+        d2c = deal_to_contact_map(sess, deal_ids)
+        needed = [cid for cid in set(d2c.values()) if cid not in lead_history_cache]
+        if needed:
+            fresh = contact_lead_status_history(sess, needed)
+            lead_history_cache.update(fresh)
+            # Remember misses so we don't re-fetch on the next day
+            for cid in needed:
+                lead_history_cache.setdefault(cid, [])
+        for deal_id, team, createdate in deferred:
+            cid = d2c.get(deal_id)
+            if not cid:
+                result[team]["deals_other"] += 1
+                continue
+            hist = lead_history_cache.get(cid, [])
+            origin = attribute_n8n_deal(hist, createdate)
+            result[team][f"deals_{origin}"] += 1
 
     # Calls
     calls = calls_for_day(sess, day)
@@ -300,11 +384,12 @@ def main():
     print(f"→ syncing {len(days)} days: {days[0]} → {days[-1]}")
 
     contact_owner_cache: dict[str, str] = {}
+    lead_history_cache: dict[str, list[dict]] = {}
     rows_to_upsert: list[dict] = []
 
     for d in days:
         t0 = time.time()
-        agg = sync_day(sess, owner_team, d, contact_owner_cache)
+        agg = sync_day(sess, owner_team, d, contact_owner_cache, lead_history_cache)
         total = sum(sum(v.values()) for v in agg.values())
         print(f"  {d}: {len(agg)} teams, {total} events "
               f"(cache={len(contact_owner_cache)}) [{time.time()-t0:.1f}s]", flush=True)

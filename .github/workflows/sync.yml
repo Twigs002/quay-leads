@@ -23,7 +23,9 @@ concurrency:
 jobs:
   sync:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # 20 min covers normal 3-day incremental runs (~1 min).
+    # First-run backfill of 45 days can take ~40 min — hence 60.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

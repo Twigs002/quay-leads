@@ -65,32 +65,36 @@ window.VIEWS["track"] = function (root, ctx) {
 
   function render() {
     const q = __trackState.q.trim();
-    const hits = q ? all.filter(l => matches(l, q)) : [];
+    // Show ALL leads by default, filter down as the user types.
+    // Sort by date desc so the most recent leads surface first.
+    let hits = q ? all.filter(l => matches(l, q)) : all.slice();
+    hits.sort((a, b) => (b.datestamp || "").localeCompare(a.datestamp || ""));
+    const cap = 200;
 
     root.innerHTML = `
       <h2>Track a lead</h2>
       <p class="lede">
-        Type any part of a lead's <strong>address</strong>, <strong>name</strong>, <strong>phone</strong>,
-        <strong>email</strong>, or <strong>HubSpot deal ID</strong> to trace exactly where it landed —
-        which division picked it up, which HubSpot owner it sits under, its current stage, and every
-        note logged against it.
+        Every lead, labelled <strong>address · source · HubSpot stage</strong>. Type any part of an
+        address / name / phone / email / deal ID to narrow. Click a row to expand the full trace:
+        sheet division, HubSpot owner + team, calls, notes, and last activity.
       </p>
 
       <input class="search" id="track-search" type="text"
-             placeholder='e.g. "36 Birkenhead", "Meta", "0821234567", promqueens@…, 78123456'
+             placeholder='filter: "36 Birkenhead", "Meta", "0821234567", promqueens@…, 78123456'
              value="${escapeAttr(q)}"
              autofocus
              style="width:100%; max-width:640px; margin-bottom:12px;">
 
-      ${!q
-        ? `<p class="muted">Start typing to search across ${all.length.toLocaleString()} leads.</p>`
-        : hits.length === 0
-          ? `<p class="muted">No leads match <strong>${escapeHtml(q)}</strong>. Try a shorter fragment (e.g. street name only, or first 3 digits of the phone).</p>`
-          : `<p class="muted small"><strong>${hits.length.toLocaleString()}</strong> match${hits.length === 1 ? "" : "es"} · click any card to expand.</p>
-             <div style="display:flex; flex-direction:column; gap:10px; margin-top:8px;">
-               ${hits.slice(0, 50).map(rowCard).join("")}
-             </div>
-             ${hits.length > 50 ? `<p class="muted small" style="margin-top:12px;">Showing first 50 of ${hits.length.toLocaleString()}. Narrow the search to see more.</p>` : ""}`
+      <p class="muted small">
+        <strong>${hits.length.toLocaleString()}</strong> lead${hits.length === 1 ? "" : "s"}${q ? ` match <strong>${escapeHtml(q)}</strong>` : ""}
+        ${hits.length > cap ? ` · showing most recent ${cap.toLocaleString()}` : ""}
+      </p>
+
+      ${hits.length === 0
+        ? `<p class="muted">No leads match <strong>${escapeHtml(q)}</strong>. Try a shorter fragment (street name only, or first 3 phone digits).</p>`
+        : `<div style="display:flex; flex-direction:column; gap:8px; margin-top:8px;">
+             ${hits.slice(0, cap).map(rowCard).join("")}
+           </div>`
       }
     `;
 
@@ -123,20 +127,25 @@ window.VIEWS["track"] = function (root, ctx) {
     const ownerId = l.hubspot_owner_id || "";
     const ownerTeamName = ownerId ? (ownerTeam.get(ownerId) || "Unmapped owner") : "";
 
+    // Address is the primary label; falls back to client name if the sheet
+    // row has no address (rare — inbound-call leads).
+    const primary = l.property_address
+      ? l.property_address + (l.suburb ? `, ${l.suburb}` : "")
+      : (l.client_name || l.email || "(no address)");
+
     const header = `
       <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
-        <div style="min-width:0;">
-          <div style="font-weight:700; font-size:15px; color:var(--ink);">
-            ${escapeHtml(l.client_name || l.email || "(no name)")}
+        <div style="min-width:0; flex:1;">
+          <div style="font-weight:600; font-size:14px; color:var(--ink);">
+            ${escapeHtml(primary)}
           </div>
-          <div class="muted small" style="margin-top:2px;">
-            ${escapeHtml(l.property_address || "")}${l.suburb ? " · " + escapeHtml(l.suburb) : ""}
-          </div>
+          ${l.property_address && l.client_name
+            ? `<div class="muted small" style="margin-top:2px;">${escapeHtml(l.client_name)}</div>`
+            : ""}
         </div>
         <div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
-          ${l.source ? `<span class="pill">${escapeHtml(l.source)}</span>` : ""}
+          ${l.source ? `<span class="pill">${escapeHtml(l.source)}</span>` : `<span class="pill" style="background:#EEF2F8;color:var(--slate);">no source</span>`}
           <span class="pill ${tone === "muted" ? "" : tone}">${escapeHtml(stage)}</span>
-          ${l.division ? `<span class="pill" style="background:#FDC503;color:#1A2746;">${escapeHtml(l.division)}</span>` : ""}
         </div>
       </div>
     `;

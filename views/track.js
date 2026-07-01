@@ -5,7 +5,7 @@
 window.VIEWS = window.VIEWS || {};
 
 // Persist state across renders (search term, expanded row) within a session.
-let __trackState = { q: "", expanded: null };
+let __trackState = { q: "", expanded: null, team: "", from: "", to: "" };
 
 // Owner-id → team name. Built once from ctx.cache.leads by voting on
 // (hubspot_div_id, division) pairs — same logic as scripts/team_activity_sync.py
@@ -63,35 +63,93 @@ window.VIEWS["track"] = function (root, ctx) {
     return blob.includes(q.toLowerCase());
   }
 
+  // Unique teams for the dropdown — combined from sheet divisions +
+  // owner→team map. Excludes noise like "UPDATED BELOW".
+  const teams = (() => {
+    const s = new Set();
+    for (const l of all) {
+      const d = (l.division || "").trim();
+      if (d && d.toUpperCase() !== "UPDATED BELOW") s.add(d);
+    }
+    for (const t of ownerTeam.values()) if (t) s.add(t);
+    return [...s].sort((a, b) => a.localeCompare(b));
+  })();
+
+  function inWindow(l) {
+    const t = __trackState;
+    if (t.from && (!l.datestamp || l.datestamp.slice(0, 10) < t.from)) return false;
+    if (t.to   && (!l.datestamp || l.datestamp.slice(0, 10) > t.to))   return false;
+    if (t.team) {
+      const div = (l.division || "").trim().toLowerCase();
+      const ownerT = (l.hubspot_owner_id && ownerTeam.get(l.hubspot_owner_id) || "").toLowerCase();
+      const pick = t.team.toLowerCase();
+      if (div !== pick && ownerT !== pick) return false;
+    }
+    return true;
+  }
+
   function render() {
     const q = __trackState.q.trim();
-    // Show ALL leads by default, filter down as the user types.
+    // Show ALL leads by default, then apply team/date/search filters.
     // Sort by date desc so the most recent leads surface first.
-    let hits = q ? all.filter(l => matches(l, q)) : all.slice();
+    let hits = all.filter(inWindow);
+    if (q) hits = hits.filter(l => matches(l, q));
     hits.sort((a, b) => (b.datestamp || "").localeCompare(a.datestamp || ""));
     const cap = 200;
+    const activeFilters = [
+      q                ? `matching "${q}"`               : null,
+      __trackState.team? `team = ${__trackState.team}`   : null,
+      __trackState.from? `from ${__trackState.from}`     : null,
+      __trackState.to  ? `to ${__trackState.to}`         : null,
+    ].filter(Boolean);
 
     root.innerHTML = `
       <h2>Track a lead</h2>
       <p class="lede">
-        Every lead, labelled <strong>address · source · HubSpot stage</strong>. Type any part of an
-        address / name / phone / email / deal ID to narrow. Click a row to expand the full trace:
-        sheet division, HubSpot owner + team, calls, notes, and last activity.
+        Every lead, labelled <strong>date · address · source · HubSpot stage</strong>. Filter by
+        team + date range or search any part of address / name / phone / email / deal ID. Click a
+        row to expand the full trace.
       </p>
 
-      <input class="search" id="track-search" type="text"
-             placeholder='filter: "36 Birkenhead", "Meta", "0821234567", promqueens@…, 78123456'
-             value="${escapeAttr(q)}"
-             autofocus
-             style="width:100%; max-width:640px; margin-bottom:12px;">
+      <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end; margin-bottom:14px;">
+        <label style="flex:1 1 240px; min-width:220px;">
+          <div class="muted small" style="margin-bottom:4px;">Search</div>
+          <input class="search" id="track-search" type="text"
+                 placeholder='"36 Birkenhead", "Meta", 082…, promqueens@…, 78123456'
+                 value="${escapeAttr(q)}"
+                 autofocus
+                 style="width:100%;">
+        </label>
+        <label style="flex:0 0 200px;">
+          <div class="muted small" style="margin-bottom:4px;">Team</div>
+          <select id="track-team" style="width:100%; padding:8px 10px; border:1px solid var(--line); border-radius:8px; font: inherit;">
+            <option value="">All teams</option>
+            ${teams.map(t => `<option value="${escapeAttr(t)}"${__trackState.team === t ? " selected" : ""}>${escapeHtml(t)}</option>`).join("")}
+          </select>
+        </label>
+        <label style="flex:0 0 150px;">
+          <div class="muted small" style="margin-bottom:4px;">From</div>
+          <input id="track-from" type="date" value="${escapeAttr(__trackState.from)}"
+                 style="width:100%; padding:7px 10px; border:1px solid var(--line); border-radius:8px; font: inherit;">
+        </label>
+        <label style="flex:0 0 150px;">
+          <div class="muted small" style="margin-bottom:4px;">To</div>
+          <input id="track-to" type="date" value="${escapeAttr(__trackState.to)}"
+                 style="width:100%; padding:7px 10px; border:1px solid var(--line); border-radius:8px; font: inherit;">
+        </label>
+        <button id="track-clear" class="btn-ghost"
+                style="padding:8px 14px; align-self:flex-end;${activeFilters.length ? '' : ' opacity:0.5;'}"
+                ${activeFilters.length ? '' : 'disabled'}>Clear</button>
+      </div>
 
       <p class="muted small">
-        <strong>${hits.length.toLocaleString()}</strong> lead${hits.length === 1 ? "" : "s"}${q ? ` match <strong>${escapeHtml(q)}</strong>` : ""}
+        <strong>${hits.length.toLocaleString()}</strong> lead${hits.length === 1 ? "" : "s"}
+        ${activeFilters.length ? ` · ${activeFilters.map(escapeHtml).join(" · ")}` : ""}
         ${hits.length > cap ? ` · showing most recent ${cap.toLocaleString()}` : ""}
       </p>
 
       ${hits.length === 0
-        ? `<p class="muted">No leads match <strong>${escapeHtml(q)}</strong>. Try a shorter fragment (street name only, or first 3 phone digits).</p>`
+        ? `<p class="muted">No leads match your filters. Widen the date range or clear the team pick.</p>`
         : `<div style="display:flex; flex-direction:column; gap:8px; margin-top:8px;">
              ${hits.slice(0, cap).map(rowCard).join("")}
            </div>`
@@ -109,6 +167,24 @@ window.VIEWS["track"] = function (root, ctx) {
         s2.focus();
         try { s2.setSelectionRange(caret, caret); } catch (_) {}
       }
+    });
+
+    document.getElementById("track-team").addEventListener("change", e => {
+      __trackState.team = e.target.value;
+      render();
+    });
+    document.getElementById("track-from").addEventListener("change", e => {
+      __trackState.from = e.target.value;
+      render();
+    });
+    document.getElementById("track-to").addEventListener("change", e => {
+      __trackState.to = e.target.value;
+      render();
+    });
+    const clearBtn = document.getElementById("track-clear");
+    if (clearBtn) clearBtn.addEventListener("click", () => {
+      __trackState = { q: "", expanded: null, team: "", from: "", to: "" };
+      render();
     });
 
     root.querySelectorAll("[data-toggle-email]").forEach(el => {
@@ -133,15 +209,24 @@ window.VIEWS["track"] = function (root, ctx) {
       ? l.property_address + (l.suburb ? `, ${l.suburb}` : "")
       : (l.client_name || l.email || "(no address)");
 
+    const dateShort = l.datestamp
+      ? new Date(l.datestamp).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "2-digit" })
+      : "";
+
     const header = `
       <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
-        <div style="min-width:0; flex:1;">
-          <div style="font-weight:600; font-size:14px; color:var(--ink);">
-            ${escapeHtml(primary)}
-          </div>
-          ${l.property_address && l.client_name
-            ? `<div class="muted small" style="margin-top:2px;">${escapeHtml(l.client_name)}</div>`
+        <div style="min-width:0; flex:1; display:flex; align-items:center; gap:12px;">
+          ${dateShort
+            ? `<div class="muted small tnum" style="flex:0 0 auto; font-variant-numeric:tabular-nums; min-width:70px;">${escapeHtml(dateShort)}</div>`
             : ""}
+          <div style="min-width:0; flex:1;">
+            <div style="font-weight:600; font-size:14px; color:var(--ink);">
+              ${escapeHtml(primary)}
+            </div>
+            ${l.property_address && l.client_name
+              ? `<div class="muted small" style="margin-top:2px;">${escapeHtml(l.client_name)}</div>`
+              : ""}
+          </div>
         </div>
         <div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
           ${l.source ? `<span class="pill">${escapeHtml(l.source)}</span>` : `<span class="pill" style="background:#EEF2F8;color:var(--slate);">no source</span>`}

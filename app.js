@@ -17,7 +17,11 @@
   function showApp(user) {
     $login.classList.add("hidden");
     $app.classList.remove("hidden");
-    $userLabel.textContent = `${user.name}${user.isSuper ? " · super" : user.isAdmin ? " · admin" : ""}`;
+    // Team members see their scope; supers/admins see their role.
+    const scope = (user.isSuper || user.isAdmin)
+      ? (user.isSuper ? " · super" : " · admin")
+      : (user.division ? ` · ${user.division}` : "");
+    $userLabel.textContent = `${user.name}${scope}`;
   }
 
   function showError(msg) {

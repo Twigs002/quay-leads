@@ -27,9 +27,12 @@ window.DATA = (() => {
     const { data: staff } = await sb.from("staff").select("*").eq("auth_user_id", data.user.id).maybeSingle();
     if (!staff) { await sb.auth.signOut(); return { ok: false, error: "No staff record." }; }
     if (staff.active === false) { await sb.auth.signOut(); return { ok: false, error: "Account is disabled." }; }
-    if (!staff.is_super && !staff.is_admin) {
+    // Any active staff can log in. What they see is server-scoped by
+    // the leads_enriched view — super/admin get all leads, everyone
+    // else sees only their team's rows (matched via staff.division).
+    if (!staff.division && !staff.is_super && !staff.is_admin) {
       await sb.auth.signOut();
-      return { ok: false, error: "Superuser access required for the leads dashboard." };
+      return { ok: false, error: "No division on file — ask an admin to set your team." };
     }
     return { ok: true, user: {
       username: staff.id, name: staff.name,
@@ -48,7 +51,9 @@ window.DATA = (() => {
     const { data } = await sb.auth.getSession();
     if (!data.session) return null;
     const { data: staff } = await sb.from("staff").select("*").eq("auth_user_id", data.session.user.id).maybeSingle();
-    if (!staff || staff.active === false || (!staff.is_super && !staff.is_admin)) return null;
+    if (!staff || staff.active === false) return null;
+    // Team members must have a division; admins/supers don't need one.
+    if (!staff.division && !staff.is_super && !staff.is_admin) return null;
     return {
       username: staff.id, name: staff.name,
       email: data.session.user.email, division: staff.division,

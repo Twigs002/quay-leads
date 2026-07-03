@@ -47,7 +47,12 @@ $$;
 comment on function public.owner_team_for(text) is
   'Vote-based owner_id → team name. Used by leads_enriched RLS so a lead assigned to a HubSpot owner surfaces for that owner''s team members even when the sheet division is stale.';
 
-create or replace view public.leads_enriched
+-- Drop first: `create or replace view` refuses to change the column list of
+-- an existing view (Postgres 42P16). No dependents on leads_enriched right
+-- now, so a clean drop is safe.
+drop view if exists public.leads_enriched;
+
+create view public.leads_enriched
 with (security_invoker = off) as
 with caller as (
   select id,

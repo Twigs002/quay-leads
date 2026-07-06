@@ -109,7 +109,28 @@ window.DATA = (() => {
     return _cache;
   }
 
-  function invalidate() { _cache = null; }
+  // Per-deal call history — Track tab pulls this lazily when a row expands.
+  // Small per-deal-id cache so re-expanding the same row doesn't refetch.
+  const _callsCache = new Map();
+
+  function invalidate() { _cache = null; _callsCache.clear(); }
+
+  async function getDealCalls(dealId) {
+    const key = String(dealId || "");
+    if (!key) return [];
+    if (_callsCache.has(key)) return _callsCache.get(key);
+    const sb = client();
+    const { data, error } = await sb
+      .from("hs_deal_calls")
+      .select("call_id, ts, direction, disposition, hubspot_owner_id, duration_sec, notes")
+      .eq("deal_id", key)
+      .order("ts", { ascending: false })
+      .limit(500);
+    if (error) throw error;
+    const rows = data || [];
+    _callsCache.set(key, rows);
+    return rows;
+  }
 
   async function addNote(email, note, actionedBy) {
     const { error } = await client().from("lead_actions").insert({
@@ -141,5 +162,5 @@ window.DATA = (() => {
     return body;
   }
 
-  return { client, signIn, signOut, getSession, loadAll, invalidate, addNote, triggerSync };
+  return { client, signIn, signOut, getSession, loadAll, invalidate, addNote, getDealCalls, triggerSync };
 })();

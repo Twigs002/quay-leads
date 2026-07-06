@@ -4,10 +4,12 @@ Sync the Quay 1 Seller Lead Bank → Supabase, every 30 min.
 Reads:
   - Google Sheet via service account (read-only on the sheet)
   - HubSpot deal stages + per-deal call counts (batched)
+  - HubSpot call engagements (details for the Track-tab history)
 
 Writes:
   - Supabase public.leads          (upsert by lowercased email)
   - Supabase public.hs_deal_state  (upsert by deal_id)
+  - Supabase public.hs_deal_calls  (upsert by (deal_id, call_id))
   - Supabase public.sync_status    (heartbeat + last error)
 
 Idempotent. Safe to run on a cron; nothing is destructively replaced
@@ -236,10 +238,17 @@ def fetch_deals(sess: requests.Session, deal_ids: Iterable[str]) -> tuple[list[d
     return out, failed
 
 
-def fetch_call_counts(sess: requests.Session, deal_ids: Iterable[str]) -> tuple[dict[str, int], set[str]]:
-    """Return ({deal_id: count}, failed_ids). Same contract as fetch_deals:
-    failed batches must not overwrite known-good num_calls."""
-    out: dict[str, int] = {}
+def fetch_call_counts(sess: requests.Session, deal_ids: Iterable[str]) -> tuple[dict[str, int], dict[str, list[str]], set[str]]:
+    """Return ({deal_id: count}, {deal_id: [call_id, ...]}, failed_ids).
+
+    Same contract as fetch_deals: failed batches must not overwrite known-
+    good num_calls. The call-id map lets the caller fetch full call details
+    downstream (for hs_deal_calls). Deals with zero calls appear in the
+    count map (as 0) but NOT in the id map, so the caller can iterate the
+    id map without spurious empty entries.
+    """
+    counts: dict[str, int] = {}
+    ids: dict[str, list[str]] = {}
     failed: set[str] = set()
     for chunk in chunks(deal_ids, BATCH):
         body = {"inputs": [{"id": d} for d in chunk]}
@@ -250,13 +259,78 @@ def fetch_call_counts(sess: requests.Session, deal_ids: Iterable[str]) -> tuple[
             continue
         for rec in (data or {}).get("results", []):
             did = (rec.get("from") or {}).get("id")
-            if did:
-                out[str(did)] = len(rec.get("to") or [])
+            if not did:
+                continue
+            tos = rec.get("to") or []
+            counts[str(did)] = len(tos)
+            call_ids = [str(t.get("toObjectId")) for t in tos if t.get("toObjectId")]
+            if call_ids:
+                ids[str(did)] = call_ids
         # Only zero-out IDs that came from SUCCESSFUL batches and weren't returned.
-        # (Failed-batch IDs stay absent from `out` so the upsert skips them.)
+        # (Failed-batch IDs stay absent from `counts` so the upsert skips them.)
         for d in chunk:
-            out.setdefault(str(d), 0)
+            counts.setdefault(str(d), 0)
+    return counts, ids, failed
+
+
+# ── HubSpot → call details (Track-tab history) ──────────────────────────
+HS_CALL_PROPS = [
+    "hs_timestamp",
+    "hs_call_direction",
+    "hs_call_disposition",
+    "hs_call_duration",
+    "hs_call_body",
+    "hubspot_owner_id",
+]
+
+
+def fetch_call_details(sess: requests.Session, call_ids: Iterable[str]) -> tuple[dict[str, dict], set[str]]:
+    """Return ({call_id: {ts, direction, disposition, duration_sec, notes,
+    hubspot_owner_id}}, failed_ids).
+
+    Uses /crm/v3/objects/calls/batch/read so we only make one API call per
+    100 IDs regardless of how they distribute across deals.
+    """
+    out: dict[str, dict] = {}
+    failed: set[str] = set()
+    for chunk in chunks(sorted(set(call_ids)), BATCH):
+        body = {"properties": HS_CALL_PROPS, "inputs": [{"id": c} for c in chunk]}
+        try:
+            data = hs_request(sess, "POST", f"{HS_API}/crm/v3/objects/calls/batch/read", json=body)
+        except RuntimeError:
+            failed.update(str(c) for c in chunk)
+            continue
+        for rec in (data or {}).get("results", []):
+            p = rec.get("properties") or {}
+            dur_ms = p.get("hs_call_duration")
+            try:
+                dur_sec = int(dur_ms) // 1000 if dur_ms not in (None, "") else None
+            except (TypeError, ValueError):
+                dur_sec = None
+            out[str(rec.get("id"))] = {
+                "ts":               p.get("hs_timestamp"),
+                "direction":        p.get("hs_call_direction"),
+                "disposition":      p.get("hs_call_disposition"),
+                "duration_sec":     dur_sec,
+                "notes":            _strip_html(p.get("hs_call_body")),
+                "hubspot_owner_id": p.get("hubspot_owner_id"),
+            }
     return out, failed
+
+
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
+_WS_RE = re.compile(r"\s+")
+
+
+def _strip_html(s):
+    """HubSpot's hs_call_body is HTML (from the CRM UI). Return plain text,
+    collapsed whitespace, capped at 4KB so a runaway note can't blow up a
+    row. Returns None if the input is empty."""
+    if not s:
+        return None
+    txt = _HTML_TAG_RE.sub(" ", str(s))
+    txt = _WS_RE.sub(" ", txt).strip()
+    return (txt[:4000] if len(txt) > 4000 else txt) or None
 
 
 def _to_float(v):
@@ -303,7 +377,7 @@ def main():
         print("→ fetching deal stages + call counts from HubSpot")
         labels = fetch_stage_labels(sess)
         deals, deals_failed = fetch_deals(sess, deal_ids)
-        calls, calls_failed = fetch_call_counts(sess, deal_ids)
+        calls, deal_call_ids, calls_failed = fetch_call_counts(sess, deal_ids)
         # IDs that belonged to a failed batch on EITHER side are excluded —
         # never overwrite real Supabase rows with placeholders on transient errors.
         failed_ids = deals_failed | calls_failed
@@ -353,7 +427,44 @@ def main():
         n_deals = upsert_chunked(sb, "hs_deal_state", deal_rows, on_conflict="deal_id")
         print(f"  upserted {n_deals:,}")
 
-        heartbeat(sb, "leads_sync", ok=True, message=f"{n_leads} leads, {n_deals} deals")
+        # Call details for the Track-tab per-lead history. We already have
+        # deal_id → [call_id, ...] from fetch_call_counts; fetch each unique
+        # call once, then explode back into (deal_id, call_id) rows.
+        unique_call_ids: set[str] = set()
+        for cids in deal_call_ids.values():
+            unique_call_ids.update(cids)
+        print(f"→ fetching details for {len(unique_call_ids):,} unique calls")
+        call_details, call_details_failed = ({}, set())
+        if unique_call_ids:
+            call_details, call_details_failed = fetch_call_details(sess, unique_call_ids)
+            if call_details_failed:
+                print(f"  ! {len(call_details_failed):,} call_ids in failed batches — skipping")
+
+        call_rows: list[dict] = []
+        refreshed_now = datetime.now(timezone.utc).isoformat()
+        for did, cids in deal_call_ids.items():
+            if did in failed_ids:
+                continue  # never overwrite good rows during a transient failure
+            for cid in cids:
+                det = call_details.get(cid)
+                if not det:
+                    continue  # failed batch or deleted call — skip silently
+                call_rows.append({
+                    "deal_id":          did,
+                    "call_id":          cid,
+                    "ts":               det["ts"],
+                    "direction":        det["direction"],
+                    "disposition":      det["disposition"],
+                    "hubspot_owner_id": det["hubspot_owner_id"],
+                    "duration_sec":     det["duration_sec"],
+                    "notes":            det["notes"],
+                    "refreshed_at":     refreshed_now,
+                })
+        print(f"→ upserting hs_deal_calls")
+        n_calls = upsert_chunked(sb, "hs_deal_calls", call_rows, on_conflict="deal_id,call_id") if call_rows else 0
+        print(f"  upserted {n_calls:,}")
+
+        heartbeat(sb, "leads_sync", ok=True, message=f"{n_leads} leads, {n_deals} deals, {n_calls} calls")
         print(f"✓ done at {datetime.now(timezone.utc).isoformat()}")
     except Exception as e:
         msg = f"{type(e).__name__}: {e}"

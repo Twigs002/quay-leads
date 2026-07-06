@@ -7,6 +7,11 @@ window.VIEWS = window.VIEWS || {};
 // Persist state across renders (search term, expanded row) within a session.
 let __trackState = { q: "", expanded: null, team: "", from: "", to: "" };
 
+// Per-deal call history, populated lazily when a row expands. Keyed by
+// deal_id → { status: "loading" | "ready" | "error", rows: [...], error: "" }.
+// Kept module-scoped so re-renders (search, filter tweaks) don't refetch.
+const __callHistory = new Map();
+
 // Owner-id → team name. Built once from ctx.cache.leads by voting on
 // (hubspot_div_id, division) pairs — same logic as scripts/team_activity_sync.py
 // but done client-side so we don't need a new API round-trip.
@@ -36,6 +41,34 @@ function _hsDealLink(dealId) {
 }
 function _hsOwnerLink(ownerId) {
   return `https://app.hubspot.com/settings/${HUBSPOT_PORTAL_ID}/users?userId=${encodeURIComponent(ownerId)}`;
+}
+
+// Format seconds as m:ss (or "—" if null/0-but-really-null). Zero-second
+// calls do occur — HubSpot logs voicemail leaves at 0s — so we DO render 0:00.
+function _fmtDuration(sec) {
+  if (sec === null || sec === undefined) return "—";
+  const n = Number(sec);
+  if (!Number.isFinite(n) || n < 0) return "—";
+  const m = Math.floor(n / 60);
+  const s = Math.floor(n % 60);
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+// HubSpot dispositions come back as an internal UUID rather than a label
+// (the label lookup lives in a separate settings endpoint). Show the raw
+// value truncated so a caller at least sees SOMETHING is set. Falls back
+// to em-dash for null.
+function _shortDisposition(d) {
+  if (!d) return "—";
+  const s = String(d);
+  return s.length > 12 ? s.slice(0, 8) + "…" : s;
+}
+
+function _dirBadge(dir) {
+  const d = (dir || "").toUpperCase();
+  if (d === "INBOUND")  return `<span class="pill" style="background:#E7F5EC;color:#0F6E3B;">In</span>`;
+  if (d === "OUTBOUND") return `<span class="pill" style="background:#EEF2F8;color:var(--slate);">Out</span>`;
+  return `<span class="pill" style="background:#F5F5F5;color:var(--slate);">—</span>`;
 }
 
 function _stageTone(stage) {
@@ -190,10 +223,87 @@ window.VIEWS["track"] = function (root, ctx) {
     root.querySelectorAll("[data-toggle-email]").forEach(el => {
       el.addEventListener("click", () => {
         const em = el.dataset.toggleEmail;
+        const dealId = el.dataset.dealId || "";
         __trackState.expanded = (__trackState.expanded === em) ? null : em;
+        // Kick off the call-history fetch the first time this deal expands.
+        // Subsequent expansions reuse the cache. Deals without a deal_id
+        // (retry / action-needed leads) skip this entirely.
+        if (__trackState.expanded === em && dealId && !__callHistory.has(dealId)) {
+          __callHistory.set(dealId, { status: "loading", rows: [], error: "" });
+          DATA.getDealCalls(dealId).then(rows => {
+            __callHistory.set(dealId, { status: "ready", rows, error: "" });
+            // Only re-render if this row is still the expanded one — user
+            // may have clicked away by the time the promise resolves.
+            if (__trackState.expanded === em) render();
+          }).catch(err => {
+            __callHistory.set(dealId, {
+              status: "error", rows: [], error: String(err && err.message || err),
+            });
+            if (__trackState.expanded === em) render();
+          });
+        }
         render();
       });
     });
+  }
+
+  function renderCallHistory(dealId) {
+    if (!dealId) {
+      return `<div class="muted small" style="margin-top:14px;">No HubSpot deal — no call history to show.</div>`;
+    }
+    const state = __callHistory.get(dealId);
+    if (!state || state.status === "loading") {
+      return `<div class="muted small" style="margin-top:14px;">Loading call history…</div>`;
+    }
+    if (state.status === "error") {
+      return `<div class="muted small" style="margin-top:14px; color:var(--red, #b00);">
+        Couldn't load calls: ${escapeHtml(state.error || "unknown error")}
+      </div>`;
+    }
+    const rows = state.rows || [];
+    if (rows.length === 0) {
+      return `<div class="muted small" style="margin-top:14px;">No calls logged against this deal yet.</div>`;
+    }
+    const header = `
+      <thead>
+        <tr>
+          <th style="text-align:left; padding:6px 10px 6px 0; font-weight:600; color:var(--slate); white-space:nowrap;">When</th>
+          <th style="text-align:left; padding:6px 10px; font-weight:600; color:var(--slate);">Dir</th>
+          <th style="text-align:right; padding:6px 10px; font-weight:600; color:var(--slate); white-space:nowrap;">Duration</th>
+          <th style="text-align:left; padding:6px 10px; font-weight:600; color:var(--slate);">Disposition</th>
+          <th style="text-align:left; padding:6px 10px; font-weight:600; color:var(--slate);">Agent</th>
+          <th style="text-align:left; padding:6px 0 6px 10px; font-weight:600; color:var(--slate);">Notes</th>
+        </tr>
+      </thead>
+    `;
+    const body = rows.map(r => {
+      const when = r.ts ? fmtDate(r.ts) : "—";
+      const agent = r.hubspot_owner_id
+        ? `<a href="${_hsOwnerLink(r.hubspot_owner_id)}" target="_blank" rel="noopener">${escapeHtml(r.hubspot_owner_id)}</a>`
+        : "—";
+      const notes = r.notes ? escapeHtml(r.notes) : `<span class="muted">—</span>`;
+      return `<tr style="border-top:1px solid var(--line);">
+        <td style="padding:8px 10px 8px 0; vertical-align:top; white-space:nowrap; font-variant-numeric:tabular-nums;">${escapeHtml(when)}</td>
+        <td style="padding:8px 10px; vertical-align:top;">${_dirBadge(r.direction)}</td>
+        <td style="padding:8px 10px; vertical-align:top; text-align:right; font-variant-numeric:tabular-nums;">${escapeHtml(_fmtDuration(r.duration_sec))}</td>
+        <td style="padding:8px 10px; vertical-align:top;">${escapeHtml(_shortDisposition(r.disposition))}</td>
+        <td style="padding:8px 10px; vertical-align:top;">${agent}</td>
+        <td style="padding:8px 0 8px 10px; vertical-align:top; max-width:340px;">${notes}</td>
+      </tr>`;
+    }).join("");
+    return `
+      <div style="margin-top:16px;">
+        <div class="muted small" style="text-transform:uppercase; letter-spacing:0.04em; margin-bottom:6px;">
+          Call history · ${rows.length} call${rows.length === 1 ? "" : "s"} (most recent first)
+        </div>
+        <div style="overflow-x:auto;">
+          <table style="width:100%; font-size:12.5px; border-collapse:collapse;">
+            ${header}
+            <tbody>${body}</tbody>
+          </table>
+        </div>
+      </div>
+    `;
   }
 
   function rowCard(l) {
@@ -213,9 +323,19 @@ window.VIEWS["track"] = function (root, ctx) {
       ? new Date(l.datestamp).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "2-digit" })
       : "";
 
+    // Chevron makes it obvious the row is expandable. Rotates on expand.
+    const chev = `<span class="muted" style="flex:0 0 auto; font-size:11px; line-height:1;
+      display:inline-block; width:14px; text-align:center;
+      transform:${expanded ? "rotate(90deg)" : "rotate(0deg)"};
+      transition:transform 0.15s ease;">▶</span>`;
+    const callChip = l.num_calls > 0
+      ? `<span class="pill" style="background:#EEF2F8; color:var(--slate);">${l.num_calls} call${l.num_calls === 1 ? "" : "s"}</span>`
+      : "";
+
     const header = `
       <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
         <div style="min-width:0; flex:1; display:flex; align-items:center; gap:12px;">
+          ${chev}
           ${dateShort
             ? `<div class="muted small tnum" style="flex:0 0 auto; font-variant-numeric:tabular-nums; min-width:70px;">${escapeHtml(dateShort)}</div>`
             : ""}
@@ -229,6 +349,7 @@ window.VIEWS["track"] = function (root, ctx) {
           </div>
         </div>
         <div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
+          ${callChip}
           ${l.source ? `<span class="pill">${escapeHtml(l.source)}</span>` : `<span class="pill" style="background:#EEF2F8;color:var(--slate);">no source</span>`}
           <span class="pill ${tone === "muted" ? "" : tone}">${escapeHtml(stage)}</span>
         </div>
@@ -238,6 +359,7 @@ window.VIEWS["track"] = function (root, ctx) {
     if (!expanded) {
       return `
         <div class="card" data-toggle-email="${escapeAttr(l.email)}"
+             data-deal-id="${escapeAttr(l.deal_id || "")}"
              style="cursor:pointer; padding:14px 16px;">
           ${header}
         </div>
@@ -293,11 +415,14 @@ window.VIEWS["track"] = function (root, ctx) {
 
     return `
       <div class="card" style="padding:16px 20px;">
-        <div data-toggle-email="${escapeAttr(l.email)}" style="cursor:pointer;">${header}</div>
+        <div data-toggle-email="${escapeAttr(l.email)}"
+             data-deal-id="${escapeAttr(l.deal_id || "")}"
+             style="cursor:pointer;">${header}</div>
         <table style="width:100%; margin-top:14px; font-size:13px; border-collapse:collapse;">
           <tbody>${table}</tbody>
         </table>
         ${noteBlock}
+        ${renderCallHistory(l.deal_id || "")}
       </div>
     `;
   }

@@ -175,22 +175,41 @@ def fetch_sheet_leads(sheet_id: str) -> list[dict]:
 SAST = ZoneInfo("Africa/Johannesburg")
 
 
+def _defuture(dt, now):
+    """A lead can never arrive in the future. Some automated feeds (Google
+    Forms, bots) write dates month-first (US M/D/Y) while the sheet default is
+    day-first, so an ambiguous date gets its day/month swapped and can land
+    ahead of now. If the day/month are interchangeable (both <= 12) and
+    swapping yields a past date, swap them back."""
+    if dt > now and dt.day <= 12 and dt.month <= 12:
+        try:
+            swapped = dt.replace(month=dt.day, day=dt.month)
+            if swapped <= now:
+                return swapped
+        except ValueError:
+            pass
+    return dt
+
+
 def _parse_dt_dayfirst(v):
     """Accept 'dd/mm/yyyy hh:mm:ss' (sheet's default), ISO, or already a dt."""
     if v in (None, ""):
         return None
+    now = datetime.now(SAST)
+    dt = None
     if isinstance(v, datetime):
-        if v.tzinfo is None:
-            v = v.replace(tzinfo=SAST)
-        return v.astimezone(timezone.utc).isoformat()
-    s = str(v).strip()
-    for fmt in ("%d/%m/%Y %H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d"):
-        try:
-            dt = datetime.strptime(s, fmt)
-            return dt.replace(tzinfo=SAST).astimezone(timezone.utc).isoformat()
-        except ValueError:
-            continue
-    return None
+        dt = (v if v.tzinfo else v.replace(tzinfo=SAST)).astimezone(SAST)
+    else:
+        s = str(v).strip()
+        for fmt in ("%d/%m/%Y %H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d"):
+            try:
+                dt = datetime.strptime(s, fmt).replace(tzinfo=SAST)
+                break
+            except ValueError:
+                continue
+    if dt is None:
+        return None
+    return _defuture(dt, now).astimezone(timezone.utc).isoformat()
 
 
 # ── HubSpot → deal state ────────────────────────────────────────────────

@@ -8,11 +8,15 @@
   --line: #E0E7F1;
 
   /* brand */
+  --blue-900: #1E2E59;
+  --blue-800: #3D5BA6;   /* primary brand accent (matches quay-hubspot / dashboard-v2) */
+  --blue-700: #4C6BB8;
   --yellow: #FDC503;
   --yellow-deep: #B98A02;
   --yellow-soft: #FDE08A;
   --sky: #98C5ED;
   --sky-deep: #2E6FB0;
+  --sky-tint: #E9F2FB;
 
   /* type */
   --ink: #1A2746;
@@ -72,15 +76,10 @@ body {
 }
 .login-card .brand-mark {
   display: flex; align-items: center; gap: 12px;
-  margin-bottom: 18px;
+  margin-bottom: 22px;
 }
-.login-card .brand-mark .dot {
-  width: 14px; height: 14px; border-radius: 50%;
-  background: var(--yellow); box-shadow: 0 0 0 4px rgba(253,197,3,0.20);
-}
-.login-card .brand-mark .name {
-  font-weight: 800; font-size: 13px; letter-spacing: 0.04em;
-  text-transform: uppercase; color: rgba(255,255,255,0.8);
+.login-card .brand-mark .login-logo {
+  height: auto; width: 190px; max-width: 100%; display: block;
 }
 .login-card h1 {
   font-size: 30px;
@@ -162,43 +161,57 @@ body {
 .app { min-height: 100vh; display: flex; flex-direction: column; }
 
 .topnav {
-  background: var(--card);
-  border-bottom: 1px solid var(--line);
+  background: var(--blue-800);
+  color: #fff;
   display: flex;
   align-items: center;
   gap: 24px;
   padding: 12px 24px;
-  box-shadow: var(--shadow-sm);
+  box-shadow: var(--shadow);
 }
 .brand {
-  display: flex; align-items: center; gap: 10px;
+  display: flex; align-items: center; gap: 14px;
   font-weight: 800; font-size: 15px;
 }
-.brand-dot {
-  width: 12px; height: 12px; border-radius: 50%;
-  background: var(--yellow); box-shadow: 0 0 0 3px var(--yellow-soft);
+.brand-logo { height: 40px; width: auto; display: block; flex: none; }
+.topnav-divider {
+  width: 1px; height: 30px; background: rgba(255,255,255,0.28); flex: none;
+}
+.brand-name {
+  color: #fff; text-transform: uppercase; letter-spacing: 0.04em;
+  font-size: 15px; font-weight: 800;
 }
 .tabs {
   display: flex; gap: 4px; flex: 1;
 }
 .tabs a {
   text-decoration: none;
-  color: var(--slate);
+  color: rgba(255,255,255,0.72);
   padding: 8px 14px;
   border-radius: var(--r-sm);
   font-weight: 600;
   font-size: 13px;
   transition: all 0.15s;
 }
-.tabs a:hover { color: var(--ink); }
+.tabs a:hover { color: #fff; }
 .tabs a.active {
   background: transparent;
-  color: var(--ink);
+  color: #fff;
   box-shadow: inset 0 -2px 0 var(--yellow);
   border-radius: 0;
 }
 .user-chip { display: flex; align-items: center; gap: 12px; }
-.user-chip .muted { font-size: 12px; }
+.user-chip .muted { font-size: 12px; color: rgba(255,255,255,0.72); }
+/* Sign-out ghost button sits on the blue bar → white outline variant */
+.topnav .btn-ghost {
+  color: #fff;
+  border-color: rgba(255,255,255,0.35);
+  background: transparent;
+}
+.topnav .btn-ghost:hover {
+  background: rgba(255,255,255,0.12);
+  border-color: rgba(255,255,255,0.6);
+}
 
 .body {
   display: flex;
@@ -455,7 +468,7 @@ table.dt tbody tr:focus-visible,
 .kpi .delta:not(.up):not(.down):not(.flat) {
   /* Plain percentage like "53.0%" (no comparison) — uses default brand colour */
   background: transparent;
-  color: var(--yellow-deep);
+  color: var(--blue-800);
   padding: 0;
 }
 
@@ -548,7 +561,7 @@ table.dt td.num, table.dt th.num { text-align: right; font-variant-numeric: tabu
 }
 .segmented .team-window-btn + .team-window-btn { border-left: 1px solid var(--line); }
 .segmented .team-window-btn:hover { background: var(--paper); }
-.segmented .team-window-btn.active { background: var(--ink); color: #FFF; }
+.segmented .team-window-btn.active { background: var(--blue-800); color: #FFF; }
 .segmented .team-window-btn:focus-visible {
   outline: 2px solid var(--yellow);
   outline-offset: -2px;

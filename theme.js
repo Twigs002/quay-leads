@@ -11,8 +11,8 @@ window.THEME = (() => {
   };
 
   const PALETTE = [
-    tokens.ink, tokens.skyDeep, tokens.yellowDeep, tokens.green, tokens.red,
-    tokens.blue, "#7C3AED", "#0EA5E9", "#F97316", "#0F766E", "#9CA3AF",
+    tokens.blue, tokens.skyDeep, tokens.yellowDeep, tokens.green, tokens.red,
+    tokens.ink, "#7C3AED", "#0EA5E9", "#F97316", "#0F766E", "#9CA3AF",
   ];
 
   // Stage label → color. Hot pops red; cool stages fade.

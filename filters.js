@@ -123,46 +123,67 @@ window.FILTERS = (() => {
     wireSearch("ms-source");
   }
 
+  // Human label for the range field, e.g. "01 May 2026 – 30 Jul 2026".
+  function rangeLabel() {
+    if (!state.from && !state.to) return "All dates";
+    const f = (d) => d
+      ? new Date(d).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "2-digit", timeZone: SAST_TZ })
+      : "…";
+    return `${f(state.from)} - ${f(state.to)}`;
+  }
+
   function wireSidebar() {
     const $presets = document.getElementById("range-presets");
-    const $custom = document.getElementById("custom-dates");
-    const $from = document.getElementById("f-from");
-    const $to = document.getElementById("f-to");
+    const $input = document.getElementById("date-range-input");
     const $nodeal = document.getElementById("f-nodeal");
     const $reset = document.getElementById("f-reset");
 
-    // Reflect current range onto the preset buttons + custom-input values.
-    function syncInputs() {
-      $from.value = ymdOf(state.from);
-      $to.value = ymdOf(state.to);
-    }
+    function refreshInput() { $input.value = rangeLabel(); }
     function reflectRange() {
       $presets.querySelectorAll("button").forEach(b =>
         b.classList.toggle("active", b.dataset.range === state.range));
-      $custom.classList.toggle("hidden", state.range !== "custom");
+    }
+
+    // Calendar range picker (Litepicker) — the primary date control.
+    let programmatic = false;   // guard so setDateRange() doesn't re-fire 'selected'
+    const picker = new Litepicker({
+      element: $input,
+      singleMode: false,
+      numberOfMonths: 2,
+      numberOfColumns: 2,
+      format: "DD MMM YY",
+      startDate: state.from ? ymdOf(state.from) : null,
+      endDate:   state.to   ? ymdOf(state.to)   : null,
+      setup: (p) => {
+        p.on("selected", (d1, d2) => {
+          if (programmatic) return;
+          // Use the picked calendar day and pin it to SAST boundaries.
+          state.range = "custom";
+          state.from = dayStart(d1.format("YYYY-MM-DD"));
+          state.to   = dayEnd(d2.format("YYYY-MM-DD"));
+          refreshInput(); reflectRange(); notify();
+        });
+      },
+    });
+
+    // Push state.from/to into the picker + field without firing 'selected'.
+    function pushToPicker() {
+      programmatic = true;
+      if (state.from && state.to) picker.setDateRange(ymdOf(state.from), ymdOf(state.to));
+      else picker.clearSelection();
+      programmatic = false;
+      refreshInput();
     }
 
     $presets.addEventListener("click", (e) => {
       const btn = e.target.closest("button[data-range]");
       if (!btn) return;
       applyPreset(btn.dataset.range);
-      syncInputs();          // prefill custom inputs with the current window
+      pushToPicker();
       reflectRange();
       notify();
     });
 
-    $from.addEventListener("change", () => {
-      state.range = "custom";
-      state.from = $from.value ? dayStart($from.value) : null;
-      reflectRange();
-      notify();
-    });
-    $to.addEventListener("change", () => {
-      state.range = "custom";
-      state.to = $to.value ? dayEnd($to.value) : null;
-      reflectRange();
-      notify();
-    });
     $nodeal.addEventListener("change", () => {
       state.noDealOnly = $nodeal.checked; notify();
     });
@@ -177,13 +198,13 @@ window.FILTERS = (() => {
         if ($sum) { $sum.textContent = "All"; $sum.classList.remove("selected"); }
       });
       applyPreset("90d");    // dates snap back to the default window too
-      syncInputs();
+      pushToPicker();
       reflectRange();
       notify();
     });
 
     reflectRange();
-    syncInputs();
+    refreshInput();
 
     // Click outside any open dropdown to close it.
     document.addEventListener("click", (e) => {

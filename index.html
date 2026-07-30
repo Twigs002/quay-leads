@@ -59,21 +59,13 @@
         <h3>Filters</h3>
         <div class="filter-group">
           <h3 class="filter-sub">Date range</h3>
+          <input type="text" id="date-range-input" class="range-input" readonly placeholder="Select date range…">
           <div class="range-presets" id="range-presets">
             <button type="button" data-range="30d">30d</button>
             <button type="button" data-range="90d">90d</button>
             <button type="button" data-range="6m">6m</button>
             <button type="button" data-range="12m">12m</button>
             <button type="button" data-range="all">All</button>
-            <button type="button" data-range="custom">Custom</button>
-          </div>
-          <div class="custom-dates hidden" id="custom-dates">
-            <label>From
-              <input type="date" id="f-from">
-            </label>
-            <label>To
-              <input type="date" id="f-to">
-            </label>
           </div>
         </div>
         <details class="multi" id="ms-division">
@@ -141,6 +133,8 @@
 
   <!-- vendor -->
   <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+  <!-- Litepicker: dependency-free calendar range picker (auto-injects its own CSS) -->
+  <script defer src="https://cdn.jsdelivr.net/npm/litepicker@2.0.12/dist/litepicker.js"></script>
   <!-- Plotly basic: bar, scatter, pie — all charts in this app use these. ~830 KB vs 3.5 MB. -->
   <script defer src="https://cdn.plot.ly/plotly-basic-2.35.2.min.js"></script>
 

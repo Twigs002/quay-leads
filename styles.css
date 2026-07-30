@@ -269,7 +269,44 @@ body {
   outline: 2px solid var(--sky-deep);
   outline-offset: 2px;
 }
-.custom-dates { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+
+/* The range-picker field that opens the calendar */
+.range-input {
+  width: 100%;
+  padding: 9px 34px 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  font-family: var(--sans);
+  font-size: 13px;
+  font-weight: 600;
+  background: var(--card) url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%234A566D' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><rect x='3' y='4' width='18' height='18' rx='2'/><line x1='16' y1='2' x2='16' y2='6'/><line x1='8' y1='2' x2='8' y2='6'/><line x1='3' y1='10' x2='21' y2='10'/></svg>") no-repeat right 10px center;
+  color: var(--ink);
+  cursor: pointer;
+}
+.range-input:hover { border-color: var(--blue-700); }
+.range-input:focus { outline: none; border-color: var(--blue-800); box-shadow: 0 0 0 3px rgba(61,91,166,0.14); }
+
+/* ── Litepicker → Quay brand ───────────────────────────────────────── */
+.litepicker {
+  font-family: var(--sans) !important;
+  --litepicker-day-color: var(--ink);
+  --litepicker-day-color-hover: var(--blue-800);
+  --litepicker-is-today-color: var(--red);
+  --litepicker-is-in-range-color: var(--sky-tint);
+  --litepicker-is-start-color: #fff;
+  --litepicker-is-start-color-bg: var(--blue-800);
+  --litepicker-is-end-color: #fff;
+  --litepicker-is-end-color-bg: var(--blue-800);
+  --litepicker-button-prev-month-color-hover: var(--blue-800);
+  --litepicker-button-next-month-color-hover: var(--blue-800);
+  --litepicker-highlighted-day-color-bg: var(--sky-tint);
+  --litepicker-month-weekday-color: var(--muted);
+}
+.litepicker .container__months {
+  box-shadow: var(--shadow) !important;
+  border-radius: var(--r) !important;
+  border: 1px solid var(--line);
+}
 .filter-group label {
   display: flex; flex-direction: column; gap: 4px;
   font-size: 12px; font-weight: 500; color: var(--slate);

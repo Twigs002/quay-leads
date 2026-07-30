@@ -152,6 +152,14 @@ window.FILTERS = (() => {
       numberOfMonths: 2,
       numberOfColumns: 2,
       format: "DD MMM YY",
+      // Month + year dropdowns in the header → jump straight to any
+      // month/year instead of clicking the arrows (e.g. Jan 2025 → Feb 2026).
+      dropdowns: {
+        months: true,
+        years: true,
+        minYear: (state.maxDate ? state.maxDate.getFullYear() : new Date().getFullYear()) - 8,
+        maxYear: new Date().getFullYear(),
+      },
       startDate: state.from ? ymdOf(state.from) : null,
       endDate:   state.to   ? ymdOf(state.to)   : null,
       setup: (p) => {

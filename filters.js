@@ -4,6 +4,8 @@
 window.FILTERS = (() => {
   const state = {
     from: null, to: null,
+    range: "90d",          // active quick-range preset (or "custom")
+    maxDate: null,         // latest lead date — presets anchor to this
     divisions: new Set(),
     sources: new Set(),
     leadTypes: new Set(),
@@ -14,15 +16,42 @@ window.FILTERS = (() => {
   function notify() { for (const fn of listeners) fn(state); }
   function onChange(fn) { listeners.push(fn); }
 
+  // ── SAST-correct date boundaries ────────────────────────────────────
+  // datestamp is stored as a UTC instant (synced from SAST). Native
+  // <input type=date> values and default ranges must be interpreted in
+  // SAST (UTC+2, no DST) or boundary days drift by one. All conversions
+  // below go through Africa/Johannesburg so picking "30 Jul" means the
+  // full SAST calendar day, not UTC midnight.
+  const SAST_TZ = "Africa/Johannesburg";
+  const ymdOf   = (d) => d ? d.toLocaleDateString("en-CA", { timeZone: SAST_TZ }) : "";
+  const dayStart = (ymd) => ymd ? new Date(`${ymd}T00:00:00+02:00`) : null;
+  const dayEnd   = (ymd) => ymd ? new Date(`${ymd}T23:59:59.999+02:00`) : null;
+
+  const PRESETS = {
+    "30d": { days: 30 },
+    "90d": { days: 90 },
+    "6m":  { months: 6 },
+    "12m": { months: 12 },
+    "all": {},
+  };
+
+  // Set state.from/to for a preset, anchored to the latest lead date.
+  function applyPreset(key) {
+    state.range = key;
+    if (key === "custom") return;               // driven by the date inputs
+    if (key === "all" || !state.maxDate) { state.from = null; state.to = null; return; }
+    const p = PRESETS[key] || PRESETS["90d"];
+    const start = new Date(state.maxDate);
+    if (p.days)   start.setDate(start.getDate() - p.days);
+    if (p.months) start.setMonth(start.getMonth() - p.months);
+    state.from = dayStart(ymdOf(start));
+    state.to   = dayEnd(ymdOf(state.maxDate));
+  }
+
   function setDefault(leads) {
-    if (state.from || state.to) return;
     const dates = leads.map(l => l.datestamp_d).filter(Boolean).sort((a, b) => a - b);
-    if (dates.length) {
-      const max = dates[dates.length - 1];
-      const ninety = new Date(max); ninety.setDate(max.getDate() - 90);
-      state.from = ninety;
-      state.to = max;
-    }
+    state.maxDate = dates.length ? dates[dates.length - 1] : null;
+    applyPreset(state.range);                   // default "90d"
   }
 
   function uniq(leads, key) {
@@ -95,24 +124,43 @@ window.FILTERS = (() => {
   }
 
   function wireSidebar() {
+    const $presets = document.getElementById("range-presets");
+    const $custom = document.getElementById("custom-dates");
     const $from = document.getElementById("f-from");
     const $to = document.getElementById("f-to");
     const $nodeal = document.getElementById("f-nodeal");
     const $reset = document.getElementById("f-reset");
 
-    const fmt = (d) => d ? d.toISOString().slice(0, 10) : "";
-    $from.value = fmt(state.from);
-    $to.value = fmt(state.to);
+    // Reflect current range onto the preset buttons + custom-input values.
+    function syncInputs() {
+      $from.value = ymdOf(state.from);
+      $to.value = ymdOf(state.to);
+    }
+    function reflectRange() {
+      $presets.querySelectorAll("button").forEach(b =>
+        b.classList.toggle("active", b.dataset.range === state.range));
+      $custom.classList.toggle("hidden", state.range !== "custom");
+    }
+
+    $presets.addEventListener("click", (e) => {
+      const btn = e.target.closest("button[data-range]");
+      if (!btn) return;
+      applyPreset(btn.dataset.range);
+      syncInputs();          // prefill custom inputs with the current window
+      reflectRange();
+      notify();
+    });
 
     $from.addEventListener("change", () => {
-      state.from = $from.value ? new Date($from.value) : null;
+      state.range = "custom";
+      state.from = $from.value ? dayStart($from.value) : null;
+      reflectRange();
       notify();
     });
     $to.addEventListener("change", () => {
-      if ($to.value) {
-        const d = new Date($to.value); d.setHours(23, 59, 59, 999);
-        state.to = d;
-      } else state.to = null;
+      state.range = "custom";
+      state.to = $to.value ? dayEnd($to.value) : null;
+      reflectRange();
       notify();
     });
     $nodeal.addEventListener("change", () => {
@@ -128,8 +176,14 @@ window.FILTERS = (() => {
         const $sum = document.querySelector(`#${id} summary .summary-value`);
         if ($sum) { $sum.textContent = "All"; $sum.classList.remove("selected"); }
       });
+      applyPreset("90d");    // dates snap back to the default window too
+      syncInputs();
+      reflectRange();
       notify();
     });
+
+    reflectRange();
+    syncInputs();
 
     // Click outside any open dropdown to close it.
     document.addEventListener("click", (e) => {

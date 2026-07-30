@@ -58,12 +58,23 @@
       <aside class="sidebar">
         <h3>Filters</h3>
         <div class="filter-group">
-          <label>Date from
-            <input type="date" id="f-from">
-          </label>
-          <label>Date to
-            <input type="date" id="f-to">
-          </label>
+          <h3 class="filter-sub">Date range</h3>
+          <div class="range-presets" id="range-presets">
+            <button type="button" data-range="30d">30d</button>
+            <button type="button" data-range="90d">90d</button>
+            <button type="button" data-range="6m">6m</button>
+            <button type="button" data-range="12m">12m</button>
+            <button type="button" data-range="all">All</button>
+            <button type="button" data-range="custom">Custom</button>
+          </div>
+          <div class="custom-dates hidden" id="custom-dates">
+            <label>From
+              <input type="date" id="f-from">
+            </label>
+            <label>To
+              <input type="date" id="f-to">
+            </label>
+          </div>
         </div>
         <details class="multi" id="ms-division">
           <summary>

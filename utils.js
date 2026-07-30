@@ -27,11 +27,16 @@ window.UTILS = (() => {
   }
 
   function humanAgo(date) {
-    const s = (Date.now() - date.getTime()) / 1000;
-    if (s < 60) return `${Math.floor(s)}s ago`;
-    if (s < 3600) return `${Math.floor(s / 60)} min ago`;
-    if (s < 86400) return `${Math.floor(s / 3600)} h ago`;
-    return `${Math.floor(s / 86400)} d ago`;
+    let s = (Date.now() - date.getTime()) / 1000;
+    // Future dates (e.g. a lead whose sheet date was mis-parsed day/month)
+    // must not render as a negative "-123s ago".
+    const future = s < 0;
+    s = Math.abs(s);
+    const unit = s < 60 ? `${Math.floor(s)}s`
+      : s < 3600 ? `${Math.floor(s / 60)} min`
+      : s < 86400 ? `${Math.floor(s / 3600)} h`
+      : `${Math.floor(s / 86400)} d`;
+    return future ? `in ${unit}` : `${unit} ago`;
   }
 
   function pct(n, d) { return d ? `${(n / d * 100).toFixed(1)}%` : "—"; }

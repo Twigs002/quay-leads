@@ -35,17 +35,20 @@ window.FILTERS = (() => {
     "all": {},
   };
 
-  // Set state.from/to for a preset, anchored to the latest lead date.
+  // Set state.from/to for a preset, anchored to TODAY. (Not the latest
+  // lead date: a handful of leads carry bad future datestamps, which would
+  // otherwise push the default "last 90 days" window into an empty future.)
   function applyPreset(key) {
     state.range = key;
     if (key === "custom") return;               // driven by the date inputs
-    if (key === "all" || !state.maxDate) { state.from = null; state.to = null; return; }
+    if (key === "all") { state.from = null; state.to = null; return; }
+    const anchor = new Date();
     const p = PRESETS[key] || PRESETS["90d"];
-    const start = new Date(state.maxDate);
+    const start = new Date(anchor);
     if (p.days)   start.setDate(start.getDate() - p.days);
     if (p.months) start.setMonth(start.getMonth() - p.months);
     state.from = dayStart(ymdOf(start));
-    state.to   = dayEnd(ymdOf(state.maxDate));
+    state.to   = dayEnd(ymdOf(anchor));
   }
 
   function setDefault(leads) {

@@ -122,14 +122,23 @@ window.VIEWS.pipeline = function (root, ctx) {
     </section>
   `;
 
-  // Funnel
+  // Funnel — rendered as a horizontal bar chart (the "funnel" trace type is
+  // not in the plotly-basic bundle this app loads). Bars shrink top→bottom
+  // and carry value + %-of-initial labels, so it reads like a funnel.
+  const funLabels = ["Leads received", "Qualified lead-type", "Deal created", "Worked (call logged)"];
+  const funVals = [nLeads, nQualified, nDeal, nWorked];
+  const funText = funVals.map(v => `${v.toLocaleString()}  (${nLeads ? (v / nLeads * 100).toFixed(0) : 0}%)`);
   Plotly.newPlot("funnel-chart", [{
-    type: "funnel",
-    y: ["Leads received", "Qualified lead-type", "Deal created", "Worked (call logged)"],
-    x: [nLeads, nQualified, nDeal, nWorked],
-    textinfo: "value+percent initial",
-    marker: { color: THEME.PALETTE.slice(0, 4) },
-  }], { ...THEME.PLOTLY_LAYOUT, margin: { l: 160, r: 24, t: 24, b: 24 } }, THEME.PLOTLY_CONFIG);
+    type: "bar", orientation: "h",
+    y: funLabels.slice().reverse(),
+    x: funVals.slice().reverse(),
+    text: funText.slice().reverse(),
+    textposition: "auto",
+    insidetextanchor: "middle",
+    marker: { color: THEME.PALETTE.slice(0, 4).reverse() },
+    hovertemplate: "%{y}: %{x:,}<extra></extra>",
+  }], { ...THEME.PLOTLY_LAYOUT, margin: { l: 160, r: 24, t: 24, b: 24 },
+        xaxis: { ...THEME.PLOTLY_LAYOUT.xaxis, title: "Leads" } }, THEME.PLOTLY_CONFIG);
 
   // Stage bar
   Plotly.newPlot("stage-chart", [{

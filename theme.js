@@ -49,7 +49,7 @@ window.THEME = (() => {
     return out;
   }
 
-  const PLOTLY_LAYOUT = {
+  const BASE_PLOTLY_LAYOUT = {
     paper_bgcolor: tokens.card,
     plot_bgcolor: tokens.card,
     font: { color: tokens.ink, family: "Montserrat, system-ui, sans-serif", size: 12 },
@@ -65,5 +65,15 @@ window.THEME = (() => {
 
   const PLOTLY_CONFIG = { displayModeBar: false, responsive: true };
 
-  return { tokens, PALETTE, stageColors, PLOTLY_LAYOUT, PLOTLY_CONFIG };
+  // Plotly MUTATES the layout object it is given (e.g. it stamps
+  // xaxis.type = "date" on a chart with date x-values). Because every view
+  // spreads this shared layout, that mutation used to leak: once a date-based
+  // line chart ran, later bar charts inherited xaxis.type "date" and rendered
+  // their numeric values as epoch-millisecond timestamps (bars collapsed at
+  // 1970 → looked empty). Hand out a fresh deep clone on every access so no
+  // chart can pollute another's axes.
+  return {
+    tokens, PALETTE, stageColors, PLOTLY_CONFIG,
+    get PLOTLY_LAYOUT() { return structuredClone(BASE_PLOTLY_LAYOUT); },
+  };
 })();

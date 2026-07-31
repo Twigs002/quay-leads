@@ -28,23 +28,59 @@ window.VIEWS["reassignment"] = function (root, ctx) {
 
   root.innerHTML = `<h2>Reassignment</h2><div class="loading">Loading reassignment settings…</div>`;
 
-  DATA.loadReassignment().then(({ ready, teams, log }) => {
-    if (!ready) {
+  Promise.all([DATA.loadReassignment(), DATA.loadReassignmentCandidates()])
+    .then(([{ ready, teams, log }, cand]) => {
+      if (!ready) {
+        root.innerHTML = `<h2>Reassignment</h2>
+          <div class="card" style="padding:20px;">
+            <p><strong>Not set up yet.</strong> Run the migration
+            <code>supabase/migrations/2026-07-31_reassignment.sql</code> in the
+            Supabase SQL editor, then reload this page.</p>
+          </div>`;
+        return;
+      }
+      render(teams, log, (cand && cand.deals) || []);
+    }).catch(e => {
       root.innerHTML = `<h2>Reassignment</h2>
-        <div class="card" style="padding:20px;">
-          <p><strong>Not set up yet.</strong> Run the migration
-          <code>supabase/migrations/2026-07-31_reassignment.sql</code> in the
-          Supabase SQL editor, then reload this page.</p>
-        </div>`;
-      return;
-    }
-    render(teams, log);
-  }).catch(e => {
-    root.innerHTML = `<h2>Reassignment</h2>
-      <div class="error-box">Could not load reassignment settings: ${escapeHtml(e.message || String(e))}</div>`;
-  });
+        <div class="error-box">Could not load reassignment settings: ${escapeHtml(e.message || String(e))}</div>`;
+    });
 
-  function render(teams, log) {
+  // Build a candidate list from raw deal rows + the roster. A candidate is a
+  // deal whose current owner maps to a participating, can_originate team.
+  // days = whole days since the 72h clock origin (max of createdate + last
+  // reassignment); null when neither date is known yet (pre-backfill).
+  function buildCandidates(deals, teams) {
+    const byOwner = new Map();
+    for (const t of teams) {
+      if (t.hubspot_owner_id) byOwner.set(String(t.hubspot_owner_id), t);
+    }
+    const now = Date.now();
+    const out = [];
+    for (const d of deals) {
+      const team = byOwner.get(String(d.hubspot_owner_id || ""));
+      if (!team || !team.can_originate || !team.active) continue;
+      const origin = [d.last_reassigned_at, d.hs_createdate]
+        .map(s => (s ? new Date(s).getTime() : NaN))
+        .filter(n => !isNaN(n));
+      const clock = origin.length ? Math.max(...origin) : null;
+      const days = clock != null ? Math.floor((now - clock) / 86400000) : null;
+      out.push({
+        deal_id: d.deal_id,
+        deal_name: d.deal_name || d.deal_id,
+        stage: d.current_stage,
+        team: team.team,
+        group: team.open_border_group,
+        hops: d.reassign_hops || 0,
+        days,
+      });
+    }
+    // Stalest first; unknown-age rows sink to the bottom.
+    out.sort((a, b) => (b.days == null ? -1 : b.days) - (a.days == null ? -1 : a.days));
+    return out;
+  }
+
+  function render(teams, log, candidateDeals) {
+    const candidates = buildCandidates(candidateDeals, teams);
     // Group teams by open-border area, in a stable order.
     const order = ["WSB", "NS", "SP", "SW"];
     const byGroup = new Map();
@@ -68,10 +104,12 @@ window.VIEWS["reassignment"] = function (root, ctx) {
       </p>
 
       <div class="card" style="padding:14px 18px; margin-bottom:16px; border-left:4px solid #FDC503;">
-        <strong>Evaluator not armed yet.</strong> The trigger runs once the qualifying stage
-        names are confirmed. Toggles below are live and take effect the moment it goes on
-        (first runs will be dry-run only).
+        <strong>Evaluator not armed yet.</strong> The list below is a live preview of what
+        <em>would</em> be in scope. No deals have been moved. Toggles further down are live
+        and take effect the moment the evaluator goes on (first runs will be dry-run only).
       </div>
+
+      ${renderCandidates(candidates)}
 
       <div class="card" style="padding:20px; margin-bottom:16px;">
         <h3 style="margin:0 0 4px;">Team roster</h3>
@@ -159,6 +197,56 @@ window.VIEWS["reassignment"] = function (root, ctx) {
         }
       });
     });
+  }
+
+  // Live preview of deals that currently match stage + 0 calls, grouped
+  // under one card. The 72h rule = 3 whole days idle; rows at/over that are
+  // flagged "would move". Days come from hs_createdate (backfilled by sync);
+  // until that lands some rows show "pending".
+  function renderCandidates(candidates) {
+    const total = candidates.length;
+    const past72 = candidates.filter(c => c.days != null && c.days >= 3).length;
+    const pending = candidates.filter(c => c.days == null).length;
+
+    if (!total) {
+      return `<div class="card" style="padding:20px; margin-bottom:16px;">
+        <h3 style="margin:0 0 8px;">Candidate deals</h3>
+        <p class="muted">No deals currently match a qualifying stage with zero calls under a participating team.</p>
+      </div>`;
+    }
+
+    const daysCell = c => {
+      if (c.days == null) return `<span class="muted small">pending sync</span>`;
+      const eligible = c.days >= 3;
+      const label = c.days === 0 ? "today" : `${c.days}d`;
+      return eligible
+        ? `<strong style="color:#C0392B;">${label}</strong>`
+        : `<span>${label}</span>`;
+    };
+
+    return `<div class="card" style="padding:20px; margin-bottom:16px;">
+      <h3 style="margin:0 0 4px;">Candidate deals
+        <span class="muted small" style="font-weight:400;">· ${total} in a qualifying stage with 0 calls</span></h3>
+      <p class="muted small" style="margin:0 0 12px;">
+        Stages: External Lead, Calling Lead, Inbound Lead. <strong>${past72}</strong> already past the
+        <strong>72h</strong> (3-day) idle mark${pending ? ` · ${pending} awaiting create-date backfill (next sync)` : ""}.
+        The evaluator is off, so nothing here has moved yet.
+      </p>
+      <div class="table-wrap"><table class="dt">
+        <thead><tr>
+          <th>Deal</th><th>Current team</th><th>Area</th><th>Stage</th>
+          <th class="num">Days idle</th><th class="num">Hops</th>
+        </tr></thead>
+        <tbody>${candidates.map(c => `<tr>
+          <td>${escapeHtml(c.deal_name)}</td>
+          <td><strong>${escapeHtml(c.team)}</strong></td>
+          <td>${escapeHtml(c.group)}</td>
+          <td>${escapeHtml(c.stage)}</td>
+          <td class="num">${daysCell(c)}</td>
+          <td class="num">${c.hops || ""}</td>
+        </tr>`).join("")}</tbody>
+      </table></div>
+    </div>`;
   }
 
   function renderLog(log) {

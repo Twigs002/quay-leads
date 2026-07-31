@@ -191,6 +191,38 @@ window.DATA = (() => {
     }
   }
 
+  // Qualifying deal stages for reassignment (labels as they land in
+  // hs_deal_state.current_stage). Kept here so the view and a future
+  // evaluator share one source of truth.
+  const REASSIGN_STAGES = ["External Lead", "Calling Lead", "Inbound Lead"];
+
+  // Candidate deals: currently in a qualifying stage with no calls logged.
+  // Owner→team mapping + the 72h age cut are applied in the view (it already
+  // holds the roster). Returns raw deal rows; [] with ready:false semantics
+  // handled by the caller. hs_createdate is the 72h clock origin (null until
+  // the next sync backfills it).
+  async function loadReassignmentCandidates() {
+    const sb = client();
+    const cols = "deal_id, deal_name, current_stage, hubspot_owner_id, num_calls, hs_createdate, last_reassigned_at, reassign_hops";
+    const PAGE = 1000;
+    const rows = [];
+    for (let from = 0; ; from += PAGE) {
+      const q = sb.from("hs_deal_state").select(cols)
+        .in("current_stage", REASSIGN_STAGES)
+        .or("num_calls.eq.0,num_calls.is.null")
+        .range(from, from + PAGE - 1);
+      const { data, error } = await q;
+      if (error) {
+        if (_missingTable(error)) return { ready: false, deals: [] };
+        throw error;
+      }
+      if (!data || data.length === 0) break;
+      rows.push(...data);
+      if (data.length < PAGE) break;
+    }
+    return { ready: true, deals: rows };
+  }
+
   // Flip a single toggle (can_originate | can_receive | active) on one team.
   async function setTeamToggle(team, field, value) {
     const allowed = new Set(["can_originate", "can_receive", "active"]);
@@ -202,5 +234,5 @@ window.DATA = (() => {
     if (error) throw error;
   }
 
-  return { client, signIn, signOut, getSession, loadAll, invalidate, addNote, getDealCalls, triggerSync, loadReassignment, setTeamToggle };
+  return { client, signIn, signOut, getSession, loadAll, invalidate, addNote, getDealCalls, triggerSync, loadReassignment, loadReassignmentCandidates, setTeamToggle, REASSIGN_STAGES };
 })();

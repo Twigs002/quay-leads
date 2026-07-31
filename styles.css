@@ -40,6 +40,13 @@
   --shadow:    0 2px 6px rgba(30,46,89,.07), 0 8px 24px rgba(30,46,89,.07);
 
   --sans: 'Montserrat', system-ui, -apple-system, sans-serif;
+
+  /* ── Unified Quay 1 header (shared spec across all apps) ──────── */
+  --hdr-logo:    52px;   /* brand lockup height — middle ground, echoes the dashboard */
+  --hdr-pad-y:   16px;   /* topbar vertical padding */
+  --hdr-divider: 44px;   /* vertical divider height */
+  --hdr-title:   20px;   /* app title size */
+  --hdr-h:       84px;   /* total bar height = logo + 2*pad-y */
 }
 
 * { box-sizing: border-box; }
@@ -166,20 +173,20 @@ body {
   display: flex;
   align-items: center;
   gap: 24px;
-  padding: 12px 24px;
+  padding: var(--hdr-pad-y) 24px;
   box-shadow: var(--shadow);
 }
 .brand {
-  display: flex; align-items: center; gap: 14px;
-  font-weight: 800; font-size: 15px;
+  display: flex; align-items: center; gap: 16px;
+  font-weight: 800; font-size: var(--hdr-title);
 }
-.brand-logo { height: 40px; width: auto; display: block; flex: none; }
+.brand-logo { height: var(--hdr-logo); width: auto; display: block; flex: none; }
 .topnav-divider {
-  width: 1px; height: 30px; background: rgba(255,255,255,0.28); flex: none;
+  width: 1px; height: var(--hdr-divider); background: rgba(255,255,255,0.28); flex: none;
 }
 .brand-name {
   color: #fff; text-transform: uppercase; letter-spacing: 0.04em;
-  font-size: 15px; font-weight: 800;
+  font-size: var(--hdr-title); font-weight: 800;
 }
 .tabs {
   display: flex; gap: 4px; flex: 1;
@@ -660,6 +667,8 @@ table.dt td.num, table.dt th.num { text-align: right; font-variant-numeric: tabu
 }
 
 @media (max-width: 900px) {
+  :root { --hdr-logo: 42px; --hdr-pad-y: 12px; --hdr-title: 16px; }
+  .topnav { flex-wrap: wrap; gap: 12px 20px; }
   .body { flex-direction: column; }
   .sidebar { width: 100%; border-right: 0; border-bottom: 1px solid var(--line); }
   .grid-2, .grid-3 { grid-template-columns: 1fr; }

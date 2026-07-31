@@ -46,6 +46,7 @@ HS_PROPS = [
     "dealname", "dealstage", "amount", "closedate",
     "hs_lastmodifieddate", "hubspot_owner_id", "pipeline",
     "hs_deal_stage_probability",
+    "hs_createdate",  # 72h reassignment clock origin
 ]
 BATCH = 100
 THROTTLE_S = 0.35  # ~3 req/s — well under HubSpot's 10/s sustained
@@ -253,6 +254,7 @@ def fetch_deals(sess: requests.Session, deal_ids: Iterable[str]) -> tuple[list[d
                 "hubspot_owner_id":  p.get("hubspot_owner_id"),
                 "pipeline":          p.get("pipeline"),
                 "probability":       _to_float(p.get("hs_deal_stage_probability")),
+                "hs_createdate":     p.get("hs_createdate"),
             })
     return out, failed
 

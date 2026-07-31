@@ -22,6 +22,10 @@
       ? (user.isSuper ? " · super" : " · admin")
       : (user.division ? ` · ${user.division}` : "");
     $userLabel.textContent = `${user.name}${scope}`;
+    // Super/admin-only tabs (e.g. Reassignment) are hidden in markup; reveal here.
+    if (user.isSuper || user.isAdmin) {
+      document.querySelectorAll('.tabs a[data-super]').forEach(a => a.hidden = false);
+    }
     // Shared cross-app switcher on the Quay 1 flag (superusers only; no-op else).
     if (window.QuayNav) window.QuayNav.mount({ isSuper: !!user.isSuper, current: 'leads' });
   }

@@ -162,5 +162,45 @@ window.DATA = (() => {
     return body;
   }
 
-  return { client, signIn, signOut, getSession, loadAll, invalidate, addNote, getDealCalls, triggerSync };
+  // ── Open-border reassignment (super/admin only via RLS) ────────────────
+  // Loads the team roster + recent audit log. Returns { ready:false } when
+  // the tables don't exist yet (migration not run) so the view can show a
+  // setup hint instead of erroring.
+  function _missingTable(err) {
+    if (!err) return false;
+    // Postgres undefined_table (42P01) or PostgREST schema-cache miss (PGRST205).
+    if ((err.code || "") === "42P01" || (err.code || "") === "PGRST205") return true;
+    return /does not exist|schema cache|could not find the table/i.test(err.message || "");
+  }
+
+  async function loadReassignment() {
+    const sb = client();
+    try {
+      const [teams, log] = await Promise.all([
+        sb.from("reassignment_teams").select("*").order("open_border_group").order("team"),
+        sb.from("lead_reassignments").select("*").order("evaluated_at", { ascending: false }).limit(500),
+      ]);
+      if (teams.error) {
+        if (_missingTable(teams.error)) return { ready: false, teams: [], log: [] };
+        throw teams.error;
+      }
+      return { ready: true, teams: teams.data || [], log: (log && log.data) || [] };
+    } catch (e) {
+      if (_missingTable(e)) return { ready: false, teams: [], log: [] };
+      throw e;
+    }
+  }
+
+  // Flip a single toggle (can_originate | can_receive | active) on one team.
+  async function setTeamToggle(team, field, value) {
+    const allowed = new Set(["can_originate", "can_receive", "active"]);
+    if (!allowed.has(field)) throw new Error(`bad field: ${field}`);
+    const patch = {};
+    patch[field] = !!value;
+    patch.updated_at = new Date().toISOString();
+    const { error } = await client().from("reassignment_teams").update(patch).eq("team", team);
+    if (error) throw error;
+  }
+
+  return { client, signIn, signOut, getSession, loadAll, invalidate, addNote, getDealCalls, triggerSync, loadReassignment, setTeamToggle };
 })();

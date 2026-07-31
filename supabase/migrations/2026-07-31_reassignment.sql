@@ -26,7 +26,7 @@ alter table public.hs_deal_state
 create table if not exists public.reassignment_teams (
   team              text primary key,        -- display name, matches the division-area sheet
   open_border_group text not null,           -- WSB | NS | SP | SW
-  hubspot_owner_id  text,                    -- null = can never receive (e.g. Fran)
+  hubspot_owner_id  text,                    -- null = can never receive
   can_originate     boolean not null default true,   -- may LOSE stale leads
   can_receive       boolean not null default true,   -- may be GIVEN stale leads
   active            boolean not null default true,
@@ -116,7 +116,6 @@ insert into public.reassignment_teams (team, open_border_group, hubspot_owner_id
   ('Lions',       'WSB', '61022342',   true, true),
   ('Pirates',     'WSB', '57438698',   true, true),
   ('Knights',     'WSB', '61213531',   true, true),
-  ('Fran',        'WSB', null,         true, false),  -- no owner id → originator only, never receives
   ('Slayers',     'WSB', '61951340',   true, true),
   ('Conquerors',  'WSB', '61985705',   true, true),
   ('Dolphins',    'WSB', '401875482',  true, true),

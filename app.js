@@ -22,6 +22,8 @@
       ? (user.isSuper ? " · super" : " · admin")
       : (user.division ? ` · ${user.division}` : "");
     $userLabel.textContent = `${user.name}${scope}`;
+    // Shared cross-app switcher on the Quay 1 flag (superusers only; no-op else).
+    if (window.QuayNav) window.QuayNav.mount({ isSuper: !!user.isSuper, current: 'leads' });
   }
 
   function showError(msg) {

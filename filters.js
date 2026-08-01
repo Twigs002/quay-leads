@@ -149,11 +149,13 @@ window.FILTERS = (() => {
 
     // Calendar range picker (Litepicker) — the primary date control.
     let programmatic = false;   // guard so setDateRange() doesn't re-fire 'selected'
+    // One month on phones so the two-up calendar never overflows a 375px screen.
+    const narrowScreen = window.matchMedia("(max-width: 640px)").matches;
     const picker = new Litepicker({
       element: $input,
       singleMode: false,
-      numberOfMonths: 2,
-      numberOfColumns: 2,
+      numberOfMonths: narrowScreen ? 1 : 2,
+      numberOfColumns: narrowScreen ? 1 : 2,
       format: "DD MMM YY",
       // Month + year dropdowns in the header → jump straight to any
       // month/year instead of clicking the arrows (e.g. Jan 2025 → Feb 2026).

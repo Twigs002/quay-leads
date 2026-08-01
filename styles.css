@@ -469,7 +469,9 @@ table.dt tbody tr:focus-visible,
 
 /* ── Inline note input (Action Tracker autosave) ──────────────────── */
 .note-input {
-  width: 240px;
+  width: 100%;
+  max-width: 240px;
+  min-width: 140px;
   padding: 5px 9px;
   font-family: var(--sans);
   font-size: 13px;
@@ -566,7 +568,9 @@ table.dt tbody tr:focus-visible,
   background: var(--card);
   border: 1px solid var(--line);
   border-radius: var(--r);
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
   box-shadow: var(--shadow-sm);
 }
 table.dt {
@@ -672,6 +676,23 @@ table.dt td.num, table.dt th.num { text-align: right; font-variant-numeric: tabu
   .body { flex-direction: column; }
   .sidebar { width: 100%; border-right: 0; border-bottom: 1px solid var(--line); }
   .grid-2, .grid-3 { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 640px) {
+  /* Tab bar: single swipeable row instead of ragged wrap */
+  .tabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tabs a { white-space: nowrap; }
+  /* Reclaim horizontal space eaten by generous view padding/type */
+  .view { padding: 16px 14px; }
+  .view h2 { font-size: 19px; }
+  /* Keep toast within the viewport on narrow screens */
+  .toast { left: 12px; right: 12px; max-width: none; width: auto; }
 }
 
 /* Toggle switch (Reassignment roster) */

@@ -401,7 +401,7 @@ window.VIEWS["track"] = function (root, ctx) {
     const table = rows.map(r => {
       if (r === null) return `<tr><td colspan="2" style="padding:8px 0;"><hr style="border:none; border-top:1px solid var(--line); margin:0;"></td></tr>`;
       return `<tr>
-        <td class="muted" style="padding:6px 12px 6px 0; vertical-align:top; width:170px;">${escapeHtml(r[0])}</td>
+        <td class="muted" style="padding:6px 12px 6px 0; vertical-align:top; width:40%; max-width:170px;">${escapeHtml(r[0])}</td>
         <td style="padding:6px 0; vertical-align:top;">${r[1]}</td>
       </tr>`;
     }).join("");

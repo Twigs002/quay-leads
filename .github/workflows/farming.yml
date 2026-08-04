@@ -1,0 +1,42 @@
+name: Sync farming areas (suburb map)
+
+# Ingests the division-area breakdown tab (suburb list = our farming DAB)
+# into public.farming_areas. Reference data that changes rarely, so this
+# runs weekly + on demand. On a manual run you can pass the exact tab name;
+# if the tab isn't found the job log prints the available tab names.
+on:
+  schedule:
+    - cron: '40 5 * * 1'   # Mondays 05:40 UTC
+  workflow_dispatch:
+    inputs:
+      worksheet:
+        description: 'Tab name in the leads workbook (the division-area breakdown)'
+        required: false
+        default: 'Division Area Breakdown'
+
+concurrency:
+  group: farming
+  cancel-in-progress: false
+
+jobs:
+  farming:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install deps
+        working-directory: scripts
+        run: pip install -r requirements.txt
+
+      - name: Ingest farming areas
+        working-directory: scripts
+        env:
+          SUPABASE_URL:         https://dqszbqiimbfvmmnpgpsb.supabase.co
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          GCP_SA_JSON:          ${{ secrets.GCP_SA_JSON }}
+          FARMING_WORKSHEET:    ${{ github.event.inputs.worksheet || 'Division Area Breakdown' }}
+        run: python3 farming_sync.py

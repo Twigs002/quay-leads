@@ -48,6 +48,7 @@ window.STAGES = (() => {
   const META_SOURCE_RE = /\b(meta|facebook|fb)\b/i;
   const META_COST_PER_LEAD = 80;    // R per meta lead
   const QUALIFIED_TARGET_COST = 5000; // R reference line ("R5k")
+  const COMMISSION_RATE = 0.042;    // average commission we earn on a sale (4.2%)
 
   // Sort key: known stages by pipeline order, unknowns after, "No deal yet"
   // last of all. Used as `arr.sort((a,b)=>orderIndex(a)-orderIndex(b))`.
@@ -62,7 +63,7 @@ window.STAGES = (() => {
 
   return {
     ORDER, QUALIFIED, WON, LOST, NURTURE, OUT_OF_AREA,
-    META_SOURCE_RE, META_COST_PER_LEAD, QUALIFIED_TARGET_COST,
+    META_SOURCE_RE, META_COST_PER_LEAD, QUALIFIED_TARGET_COST, COMMISSION_RATE,
     orderIndex, isQualified, isMetaSource,
   };
 })();

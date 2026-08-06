@@ -32,10 +32,6 @@ window.VIEWS.costings = function (root, ctx) {
     ? weighted.reduce((a, r) => a + (Number(r.avg_price) || 0) * Number(r.num_sales), 0) / totSales
     : 0;
 
-  const projCommission = refAvgPrice * RATE;
-  const netPerSale = projCommission - COST;
-  const leadsFunded = projCommission ? Math.round(projCommission / COST) : 0;
-
   // ── Match the leads in view to a suburb + title-type sale row ─────────────
   // House -> FT, Apartment/Flat/Townhouse -> ST (see suburb_sales.titleCode).
   const leads = (ctx.view && ctx.view.leads) || [];
@@ -53,6 +49,52 @@ window.VIEWS.costings = function (root, ctx) {
   const groupRows = Object.values(groups).sort((a, b) => b.leads - a.leads);
   const potentialPool = groupRows.reduce((a, g) => a + g.leads * (Number(g.row.avg_price) || 0) * RATE, 0);
   const dealPool = groupRows.reduce((a, g) => a + g.deals * (Number(g.row.avg_price) || 0) * RATE, 0);
+
+  // ── Break-even & expected value (conversion computed from the data) ───────
+  // Cost side: every Meta lead is R80. Earn side: a sale earns 4.2% of the
+  // price. Break-even is the conversion rate at which those two meet. We measure
+  // three real milestones from the Meta population and compare them to it.
+  // "Sold" is barely tracked in HubSpot (a couple of deals in the whole book),
+  // so MANDATE WON (Sole/Other Mandate, or the rare Sold) is used as the sale
+  // proxy — that is the point our commission is effectively secured.
+  const metaLeads = leads.filter(l => STAGES.isMetaSource(l.source));
+  const metaN = metaLeads.length;
+  const metaSpend = metaN * COST;
+  const metaQual = metaLeads.filter(l => STAGES.isQualified(l.current_stage)).length;
+  const metaMandate = metaLeads.filter(l => STAGES.isWonListing(l.current_stage)).length;
+  const metaSold = metaLeads.filter(l => l.current_stage === STAGES.WON).length;
+
+  // Average commission per sale: use the suburb value of the Meta leads that
+  // matched (so it reflects where our Meta leads actually are), else the
+  // reference average. Times the commission rate.
+  let mSum = 0, mCnt = 0;
+  for (const l of metaLeads) {
+    const r = sales.find ? sales.find(l.suburb, l.property_type) : null;
+    if (r) { mSum += Number(r.avg_price) || 0; mCnt++; }
+  }
+  const avgSalePrice = mCnt ? mSum / mCnt : refAvgPrice;
+  const avgCommission = avgSalePrice * RATE;
+
+  const breakEvenRate = avgCommission ? COST / avgCommission : null;   // fraction
+  const leadsPerSale = avgCommission ? Math.round(avgCommission / COST) : null;
+  const mandateRate = metaN ? metaMandate / metaN : 0;
+  const qualRate = metaN ? metaQual / metaN : 0;
+  const soldRate = metaN ? metaSold / metaN : 0;
+  const evPerLead = mandateRate * avgCommission;         // sale proxy = mandate won
+  const netEv = evPerLead - COST;
+  const evMultiple = COST ? evPerLead / COST : 0;
+  const salesNeeded = avgCommission ? metaSpend / avgCommission : null;   // to cover total spend
+  const beMultiple = (breakEvenRate && breakEvenRate > 0) ? mandateRate / breakEvenRate : null;
+  const above = beMultiple != null && beMultiple >= 1;
+
+  // Adaptive percent: tiny break-even rates need more decimals to be legible.
+  const pctFmt = r => {
+    const p = (r || 0) * 100;
+    if (p === 0) return "0%";
+    if (p < 0.1) return p.toFixed(3) + "%";
+    if (p < 1) return p.toFixed(2) + "%";
+    return p.toFixed(1) + "%";
+  };
 
   function card(label, value, sub, accent) {
     return `<div class="kpi"${accent ? ` style="border-left:4px solid ${accent};"` : ""}>
@@ -121,27 +163,36 @@ window.VIEWS.costings = function (root, ctx) {
     </section>
 
     <section class="card" style="margin-top:16px;">
-      <h3>Projected earnings from one Meta lead</h3>
+      <h3>Break-even &amp; expected value</h3>
       <p class="section-caption">
-        Pay <strong>${randS(COST)}</strong> for a Meta lead. If it becomes a sale, we earn
-        <strong>${ratePct}</strong> of the sale price in commission. Figures below use the
-        sales-weighted average sale price across the mapped suburbs.
+        The decision number: at <strong>${randS(COST)}</strong> a Meta lead and <strong>${ratePct}</strong>
+        commission on an average sale of <strong>${randS(avgSalePrice)}</strong>, we break even when just
+        <strong>${breakEvenRate == null ? "--" : pctFmt(breakEvenRate)}</strong> of leads convert
+        (about <strong>1 sale per ${leadsPerSale == null ? "--" : grp(leadsPerSale)} leads</strong>).
+        Conversion below is measured from the ${grp(metaN)} Meta leads in view.
       </p>
-      <div class="model-flow card" style="display:flex; flex-wrap:wrap; align-items:center; gap:12px; padding:16px 18px; margin:4px 0 12px; background:var(--paper, #f6f8fc);">
-        <span style="font-weight:800; font-size:20px;">${randS(COST)}</span>
-        <span class="muted">Meta lead</span>
-        <span style="font-size:20px; color:var(--slate,#64748b);">&rarr;</span>
-        <span class="muted">converts to a sale @ ${randS(refAvgPrice)}</span>
-        <span style="font-size:20px; color:var(--slate,#64748b);">&rarr;</span>
-        <span style="font-weight:800; font-size:20px; color:${green};">${randS(projCommission)}</span>
-        <span class="muted">commission (${ratePct})</span>
+      <div class="card" style="padding:14px 18px; margin:4px 0 12px; border-left:4px solid ${above ? green : yellow}; background:var(--paper, #f6f8fc);">
+        ${metaN === 0
+          ? `<strong>No Meta leads in the current view.</strong> Adjust the filters to see the break-even picture.`
+          : above
+            ? `<strong>Above break-even.</strong> Mandates won on Meta leads run at <strong>${pctFmt(mandateRate)}</strong>, which is
+               <strong>${beMultiple.toFixed(1)}&times;</strong> the <strong>${pctFmt(breakEvenRate)}</strong> needed to cover the ${randS(metaSpend)}
+               spent on Meta. Break-even is ${salesNeeded == null ? "--" : Math.ceil(salesNeeded)} sale(s); we have ${grp(metaMandate)} mandate(s) won.`
+            : `<strong>Below break-even so far.</strong> Mandates won on Meta leads are <strong>${pctFmt(mandateRate)}</strong> versus the
+               <strong>${pctFmt(breakEvenRate)}</strong> needed. Qualified leads (${pctFmt(qualRate)}) are the leading indicator to watch as the pipeline matures.`}
       </div>
       <div class="kpis" style="margin-top:4px;">
-        ${card("Reference avg sale price", randS(refAvgPrice), `across ${grp(totSales)} sales`)}
-        ${card("Projected commission / sale", randS(projCommission), `${ratePct} of the avg sale`, green)}
-        ${card("Net per converting lead", randS(netPerSale), `commission minus the ${randS(COST)} lead`, green)}
-        ${card("One sale funds", grp(leadsFunded) + " leads", `R80 Meta leads paid for by a single sale`, blue)}
+        ${card("Break-even conversion", breakEvenRate == null ? "--" : pctFmt(breakEvenRate), leadsPerSale == null ? "" : `1 sale per ${grp(leadsPerSale)} leads`, blue)}
+        ${card("Mandate-won rate", pctFmt(mandateRate), `${grp(metaMandate)} of ${grp(metaN)} meta leads`, above ? green : yellow)}
+        ${card("Qualified rate", pctFmt(qualRate), `${grp(metaQual)} warm / hot / mandate`)}
+        ${card("Expected value / R80 lead", randS(evPerLead), `net ${randS(netEv)} · ${evMultiple.toFixed(1)}&times; on spend`, netEv >= 0 ? green : "#B91C1C")}
+        ${card("Sales to break even", salesNeeded == null ? "--" : grp(Math.ceil(salesNeeded)), `on ${randS(metaSpend)} spend · ${grp(metaMandate)} mandates won`, above ? green : yellow)}
       </div>
+      <p class="muted small" style="margin-top:10px;">
+        Sale proxy = <strong>mandate won</strong> (Sole / Other Mandate). Fully-closed "Sold" is barely tracked in
+        HubSpot (a couple of deals in the whole book), so mandate is the honest point commission is secured.
+        Expected value = mandate rate &times; average commission; it does not discount mandates that never close.
+      </p>
     </section>
 
     <section class="card" style="margin-top:16px;">

@@ -37,10 +37,19 @@ window.STAGES = (() => {
     "Sold",
   ]);
 
-  const WON  = "Sold";                    // sold by us
-  const LOST = "Listed with Competitor";  // sold by a competitor
+  const WON  = "Sold";                    // closed sale by us
+  const LOST = "Listed with Competitor";  // listed elsewhere
   const NURTURE = "Contacted - Lead to Nurture";
   const OUT_OF_AREA = "Not My Area";      // HubSpot's own out-of-farming-area marker
+
+  // Won-the-listing milestones. In this book almost nothing reaches "Sold"
+  // (a couple of deals total) because closed sales aren't tracked to completion
+  // in HubSpot; winning the MANDATE is the realistic point our commission is
+  // secured, so break-even / expected-value uses it as the sale proxy.
+  const MANDATE = new Set(["Listed - Sole Mandate", "Listed - Other Mandate"]);
+  // Competitor outcomes = lost to us. HubSpot carries two: they listed with a
+  // competitor, or a competitor closed the sale.
+  const COMPETITOR_LOST = new Set(["Listed with Competitor", "Sold by Competitor"]);
 
   // "Meta lead" detection for the R100-per-lead cost model. Sheet Source
   // values vary (Facebook, Meta, FB Lead Ad, …) so match loosely and
@@ -60,10 +69,14 @@ window.STAGES = (() => {
 
   function isQualified(stage) { return QUALIFIED.has(stage); }
   function isMetaSource(src)  { return META_SOURCE_RE.test(src || ""); }
+  function isMandate(stage)   { return MANDATE.has(stage); }
+  // Won the listing = has a mandate, or the rare fully-closed sale.
+  function isWonListing(stage){ return MANDATE.has(stage) || stage === WON; }
+  function isLost(stage)      { return COMPETITOR_LOST.has(stage); }
 
   return {
-    ORDER, QUALIFIED, WON, LOST, NURTURE, OUT_OF_AREA,
+    ORDER, QUALIFIED, WON, LOST, NURTURE, OUT_OF_AREA, MANDATE, COMPETITOR_LOST,
     META_SOURCE_RE, META_COST_PER_LEAD, QUALIFIED_TARGET_COST, COMMISSION_RATE,
-    orderIndex, isQualified, isMetaSource,
+    orderIndex, isQualified, isMetaSource, isMandate, isWonListing, isLost,
   };
 })();

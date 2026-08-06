@@ -164,6 +164,23 @@ body {
 }
 .btn-ghost:hover { background: var(--paper); border-color: var(--slate); }
 
+/* Per-row "Reassign" action in the reassignment candidate table. */
+.btn-apply {
+  font-family: var(--sans);
+  font-weight: 700;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+  border-radius: var(--r-sm);
+  padding: 6px 12px;
+  color: #fff;
+  background: var(--blue-700, #3D5BA6);
+  border: 1px solid var(--blue-800, #2E4680);
+  transition: all 0.15s;
+}
+.btn-apply:hover:not(:disabled) { background: var(--blue-800, #2E4680); }
+.btn-apply:disabled { opacity: 0.45; cursor: not-allowed; }
+
 /* ── App shell ────────────────────────────────────────────────────── */
 .app { min-height: 100vh; display: flex; flex-direction: column; }
 

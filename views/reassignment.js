@@ -49,29 +49,63 @@ window.VIEWS["reassignment"] = function (root, ctx) {
   // deal whose current owner maps to a participating, can_originate team.
   // days = whole days since the 72h clock origin (max of createdate + last
   // reassignment); null when neither date is known yet (pre-backfill).
+  // Stable per-deal hash → an index, so the shown target is deterministic and
+  // matches what the Apply button sends (no random reshuffle on re-render).
+  function hashStr(s) {
+    let h = 0;
+    for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
+    return Math.abs(h);
+  }
+
+  // Mirror of the evaluator's target rule: a random OTHER team in the same
+  // open-border group that can_receive, is active, has an owner id, isn't the
+  // current owner, and hasn't already held this deal. Returns a team row or null.
+  function pickTarget(groupTeams, fromOwner, visited, dealId) {
+    const pool = (groupTeams || []).filter(t =>
+      t.can_receive && t.active &&
+      String(t.hubspot_owner_id || "").trim() &&
+      String(t.hubspot_owner_id) !== String(fromOwner) &&
+      !visited.has(String(t.hubspot_owner_id))
+    ).sort((a, b) => (a.team || "").localeCompare(b.team || ""));
+    if (!pool.length) return null;
+    return pool[hashStr(String(dealId)) % pool.length];
+  }
+
   function buildCandidates(deals, teams) {
     const byOwner = new Map();
+    const byGroup = new Map();
     for (const t of teams) {
       if (t.hubspot_owner_id) byOwner.set(String(t.hubspot_owner_id), t);
+      if (!byGroup.has(t.open_border_group)) byGroup.set(t.open_border_group, []);
+      byGroup.get(t.open_border_group).push(t);
     }
     const now = Date.now();
     const out = [];
     for (const d of deals) {
-      const team = byOwner.get(String(d.hubspot_owner_id || ""));
+      const fromOwner = String(d.hubspot_owner_id || "");
+      const team = byOwner.get(fromOwner);
       if (!team || !team.can_originate || !team.active) continue;
       const origin = [d.last_reassigned_at, d.hs_createdate]
         .map(s => (s ? new Date(s).getTime() : NaN))
         .filter(n => !isNaN(n));
       const clock = origin.length ? Math.max(...origin) : null;
       const days = clock != null ? Math.floor((now - clock) / 86400000) : null;
+      const visited = new Set((d.reassign_visited || []).map(x => String(x)));
+      visited.add(fromOwner);
+      const target = team.open_border_group
+        ? pickTarget(byGroup.get(team.open_border_group), fromOwner, visited, d.deal_id)
+        : null;
       out.push({
         deal_id: d.deal_id,
         deal_name: d.deal_name || d.deal_id,
         stage: d.current_stage,
         team: team.team,
+        from_owner: fromOwner,
         group: team.open_border_group,
         hops: d.reassign_hops || 0,
         days,
+        to_team: target ? target.team : null,
+        to_owner: target ? String(target.hubspot_owner_id) : null,
       });
     }
     // Stalest first; unknown-age rows sink to the bottom.
@@ -104,9 +138,11 @@ window.VIEWS["reassignment"] = function (root, ctx) {
       </p>
 
       <div class="card" style="padding:14px 18px; margin-bottom:16px; border-left:4px solid #FDC503;">
-        <strong>Evaluator not armed yet.</strong> The list below is a live preview of what
-        <em>would</em> be in scope. No deals have been moved. Toggles further down are live
-        and take effect the moment the evaluator goes on (first runs will be dry-run only).
+        <strong>Manual moves are live.</strong> Each candidate below shows the team it would move to and a
+        <strong>Reassign</strong> button. Pushing it moves that one deal in HubSpot right away (deal owner
+        plus every associated contact) and logs it below. The automatic daily evaluator stays in
+        <strong>dry-run</strong> until you set the repo variable <code>REASSIGN_ARM=1</code>, so nothing
+        moves on its own.
       </div>
 
       ${renderCandidates(candidates)}
@@ -128,6 +164,7 @@ window.VIEWS["reassignment"] = function (root, ctx) {
     `;
 
     wireToggles();
+    wireApplyButtons();
   }
 
   function renderGroup(group, rows) {
@@ -224,29 +261,69 @@ window.VIEWS["reassignment"] = function (root, ctx) {
         : `<span>${label}</span>`;
     };
 
+    const targetCell = c => c.to_team
+      ? `<strong>${escapeHtml(c.to_team)}</strong>`
+      : `<span class="muted small">no eligible team in ${escapeHtml(c.group || "area")}</span>`;
+
+    const actionCell = c => c.to_team
+      ? `<button class="btn-apply" data-deal="${escapeAttr(c.deal_id)}"
+           data-to-owner="${escapeAttr(c.to_owner)}"
+           data-from="${escapeAttr(c.team)}" data-to="${escapeAttr(c.to_team)}"
+           data-name="${escapeAttr(c.deal_name)}">Reassign →</button>`
+      : `<button class="btn-apply" disabled title="No eligible receiving team">Reassign →</button>`;
+
     return `<div class="card" style="padding:20px; margin-bottom:16px;">
       <h3 style="margin:0 0 4px;">Candidate deals
         <span class="muted small" style="font-weight:400;">· ${total} in a qualifying stage with 0 calls</span></h3>
       <p class="muted small" style="margin:0 0 12px;">
         Stages: External Lead, Calling Lead, Inbound Lead. <strong>${past72}</strong> already past the
         <strong>72h</strong> (3-day) idle mark${pending ? ` · ${pending} awaiting create-date backfill (next sync)` : ""}.
-        The evaluator is off, so nothing here has moved yet.
+        <strong>Moves to</strong> is the team a deal would go to. Push <strong>Reassign</strong> to move it
+        now in HubSpot (deal owner + every associated contact). This is immediate and real.
       </p>
       <div class="table-wrap"><table class="dt">
         <thead><tr>
-          <th>Deal</th><th>Current team</th><th>Area</th><th>Stage</th>
-          <th class="num">Days idle</th><th class="num">Hops</th>
+          <th>Deal</th><th>Current team</th><th>Moves to</th><th>Area</th><th>Stage</th>
+          <th class="num">Days idle</th><th class="num">Hops</th><th>Action</th>
         </tr></thead>
-        <tbody>${candidates.map(c => `<tr>
+        <tbody>${candidates.map(c => `<tr data-row="${escapeAttr(c.deal_id)}">
           <td>${escapeHtml(c.deal_name)}</td>
           <td><strong>${escapeHtml(c.team)}</strong></td>
+          <td>${targetCell(c)}</td>
           <td>${escapeHtml(c.group)}</td>
           <td>${escapeHtml(c.stage)}</td>
           <td class="num">${daysCell(c)}</td>
           <td class="num">${c.hops || ""}</td>
+          <td>${actionCell(c)}</td>
         </tr>`).join("")}</tbody>
       </table></div>
     </div>`;
+  }
+
+  function wireApplyButtons() {
+    root.querySelectorAll("button.btn-apply[data-deal]").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const { deal, toOwner, from, to, name } = btn.dataset;
+        if (!confirm(`Reassign "${name}" from ${from} to ${to}?\n\nThis moves the deal owner and every associated contact in HubSpot immediately.`)) return;
+        const original = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = "Moving…";
+        try {
+          const res = await DATA.applyReassignment(deal, toOwner);
+          const row = root.querySelector(`tr[data-row="${CSS.escape(deal)}"]`);
+          if (row) {
+            row.style.opacity = "0.55";
+            const actionTd = row.lastElementChild;
+            if (actionTd) actionTd.innerHTML = `<span class="pill green">moved${res.contacts_patched ? ` · ${res.contacts_patched} contacts` : ""}</span>`;
+          }
+        } catch (e) {
+          btn.disabled = false;
+          btn.textContent = original;
+          btn.title = "Failed: " + (e.message || e);
+          alert("Reassignment failed: " + (e.message || e));
+        }
+      });
+    });
   }
 
   function renderLog(log) {

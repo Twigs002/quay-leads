@@ -15,12 +15,32 @@ window.VIEWS.pipeline = function (root, ctx) {
   const nDeal = leads.filter(l => l.has_deal).length;
   const nWorked = leads.filter(l => l.worked).length;
 
-  // Live stage bar
+  // Live stage bar — ordered to match the HubSpot pipeline (chronological),
+  // not by volume, so it reads exactly like HubSpot. Each bar also carries
+  // the average HubSpot win-probability % for that stage.
   const withDeal = leads.filter(l => l.has_deal && l.current_stage);
   const byStage = {};
-  for (const l of withDeal) byStage[l.current_stage] = (byStage[l.current_stage] || 0) + 1;
-  const stageRows = Object.entries(byStage).sort((a, b) => b[1] - a[1]);
+  const probSum = {}, probN = {};
+  for (const l of withDeal) {
+    byStage[l.current_stage] = (byStage[l.current_stage] || 0) + 1;
+    if (l.probability != null && !isNaN(l.probability)) {
+      probSum[l.current_stage] = (probSum[l.current_stage] || 0) + l.probability;
+      probN[l.current_stage]   = (probN[l.current_stage]   || 0) + 1;
+    }
+  }
+  const stageRows = Object.entries(byStage)
+    .sort((a, b) => STAGES.orderIndex(a[0]) - STAGES.orderIndex(b[0]));
   const stageCmap = THEME.stageColors(stageRows.map(r => r[0]));
+  const stagePct = (s) => probN[s] ? Math.round((probSum[s] / probN[s]) * 100) : null;
+
+  // Sales outcomes (item: "sold by us" vs "sold by competitor").
+  const soldUs   = leads.filter(l => l.current_stage === STAGES.WON);
+  const soldComp = leads.filter(l => l.current_stage === STAGES.LOST);
+  const sumAmt   = arr => arr.reduce((a, l) => a + (Number(l.amount) || 0), 0);
+  const soldUsVal = sumAmt(soldUs), soldCompVal = sumAmt(soldComp);
+  const totalSold = soldUs.length + soldComp.length;
+  const winRate   = totalSold ? (soldUs.length / totalSold * 100) : 0;
+  const randMoney = v => v ? "R" + v.toLocaleString(undefined, { maximumFractionDigits: 0 }) : "R0";
 
   // Division leaderboard
   const board = {};
@@ -49,12 +69,11 @@ window.VIEWS.pipeline = function (root, ctx) {
     const k = `${l.division}|${stage}`;
     cellCounts[k] = (cellCounts[k] || 0) + 1;
   }
-  const stageVolumeTotal = {};
-  for (const [k, v] of Object.entries(cellCounts)) {
-    const stage = k.split("|")[1];
-    if (stage !== "No deal yet") stageVolumeTotal[stage] = (stageVolumeTotal[stage] || 0) + v;
-  }
-  const stageOrder = Object.keys(stageVolumeTotal).sort((a, b) => stageVolumeTotal[b] - stageVolumeTotal[a]).concat(["No deal yet"]);
+  // Chronological (HubSpot pipeline) order, with "No deal yet" pinned last.
+  const stageOrder = [...stagesSeen]
+    .filter(s => s !== "No deal yet")
+    .sort((a, b) => STAGES.orderIndex(a) - STAGES.orderIndex(b))
+    .concat(stagesSeen.has("No deal yet") ? ["No deal yet"] : []);
   const cmapDiv = THEME.stageColors(stageOrder);
   const divOrder = boardRows.slice(0, 15).slice().reverse().map(r => r.div);
   const breakdownTraces = stageOrder.map(stage => ({
@@ -74,8 +93,30 @@ window.VIEWS.pipeline = function (root, ctx) {
 
     <section class="card">
       <h3>Where the deals are on HubSpot</h3>
-      <p class="section-caption">Live deal stage from HubSpot (refreshed every 30 min by the sync job).</p>
+      <p class="section-caption">Live deal stage from HubSpot, in pipeline order. Each bar shows the deal count and the stage's average <strong>win probability %</strong>. Refreshed every 30 min by the sync job.</p>
       <div id="stage-chart" style="height: 420px;"></div>
+    </section>
+
+    <section class="card">
+      <h3>Sales outcomes</h3>
+      <p class="section-caption"><strong>Sold by us</strong> = deals in the <em>Sold</em> stage · <strong>Sold by competitor</strong> = <em>Listed with Competitor</em>. Win rate = our sales ÷ all resolved sales.</p>
+      <div class="kpis" style="margin-top: 4px;">
+        <div class="kpi" style="border-left:4px solid ${THEME.tokens.green};">
+          <div class="label">Sold by us</div>
+          <div class="value">${soldUs.length.toLocaleString()}</div>
+          <div class="delta-row muted small">${randMoney(soldUsVal)}</div>
+        </div>
+        <div class="kpi" style="border-left:4px solid #B91C1C;">
+          <div class="label">Sold by competitor</div>
+          <div class="value">${soldComp.length.toLocaleString()}</div>
+          <div class="delta-row muted small">${randMoney(soldCompVal)}</div>
+        </div>
+        <div class="kpi">
+          <div class="label">Win rate</div>
+          <div class="value">${winRate.toFixed(0)}%</div>
+          <div class="delta-row muted small">${totalSold.toLocaleString()} resolved</div>
+        </div>
+      </div>
     </section>
 
     <section>
@@ -140,12 +181,15 @@ window.VIEWS.pipeline = function (root, ctx) {
   }], { ...THEME.PLOTLY_LAYOUT, margin: { l: 160, r: 24, t: 24, b: 24 },
         xaxis: { ...THEME.PLOTLY_LAYOUT.xaxis, title: "Leads" } }, THEME.PLOTLY_CONFIG);
 
-  // Stage bar
+  // Stage bar — chronological top→bottom, labelled with count + HubSpot win %.
   Plotly.newPlot("stage-chart", [{
     type: "bar", orientation: "h",
     y: stageRows.map(r => r[0]).reverse(),
     x: stageRows.map(r => r[1]).reverse(),
+    text: stageRows.map(r => { const p = stagePct(r[0]); return p == null ? `${r[1]}` : `${r[1]}  ·  ${p}%`; }).reverse(),
+    textposition: "auto",
     marker: { color: stageRows.map(r => stageCmap[r[0]]).reverse() },
+    hovertemplate: "%{y}<br>%{x} deals<extra></extra>",
   }], { ...THEME.PLOTLY_LAYOUT, margin: { l: 220, r: 24, t: 24, b: 40 },
         xaxis: { ...THEME.PLOTLY_LAYOUT.xaxis, title: "Deals" } }, THEME.PLOTLY_CONFIG);
 

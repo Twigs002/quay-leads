@@ -46,7 +46,7 @@ window.STAGES = (() => {
   // values vary (Facebook, Meta, FB Lead Ad, …) so match loosely and
   // surface what matched in the UI so a wrong catch is obvious.
   const META_SOURCE_RE = /\b(meta|facebook|fb)\b/i;
-  const META_COST_PER_LEAD = 100;   // R per meta lead
+  const META_COST_PER_LEAD = 80;    // R per meta lead
   const QUALIFIED_TARGET_COST = 5000; // R reference line ("R5k")
 
   // Sort key: known stages by pipeline order, unknowns after, "No deal yet"

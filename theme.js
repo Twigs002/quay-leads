@@ -18,12 +18,13 @@ window.THEME = (() => {
   // Stage label → color. Hot pops red; cool stages fade.
   const SEMANTICS = [
     ["hot",         tokens.hotRed],
-    ["sold",        tokens.green],
+    ["competitor",  "#B91C1C"],   // sold by a competitor (lost) — deep red, BEFORE "listed"
+    ["sold",        tokens.green], // sold by us (won) — green
     ["warm",        tokens.warmAmber],
     ["no deal",     tokens.noDealGrey],
     ["calling",     tokens.blue],
     ["inbound",     "#0EA5E9"],
-    ["nurture",     "#94A3B8"],
+    ["nurture",     "#EC4899"],   // Lead to Nurture — its own pink, no longer blends into grey
     ["external",    "#7C3AED"],
     ["listed",      tokens.yellowDeep],
     ["not my area", "#9CA3AF"],
@@ -32,7 +33,7 @@ window.THEME = (() => {
   ];
 
   function stageColors(stages) {
-    const reserved = new Set([tokens.hotRed, tokens.green, tokens.warmAmber, tokens.noDealGrey, tokens.yellowDeep]);
+    const reserved = new Set([tokens.hotRed, "#B91C1C", "#EC4899", tokens.green, tokens.warmAmber, tokens.noDealGrey, tokens.yellowDeep]);
     const leftover = PALETTE.filter(c => !reserved.has(c));
     let li = 0;
     const out = {};

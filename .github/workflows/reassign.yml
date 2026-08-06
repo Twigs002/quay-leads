@@ -1,0 +1,43 @@
+name: Reassign stale leads (daily)
+
+# Open-border stale-lead reassignment runs ONCE A DAY (06:20 UTC ≈ 08:20
+# SAST), independent of the 30-min data sync. Leads therefore jump teams at
+# most once per day. Default is DRY-RUN: it logs intended moves to
+# lead_reassignments and writes NOTHING to HubSpot. To arm live moves later,
+# set repo variable REASSIGN_ARM=1 and it will pass --apply.
+on:
+  schedule:
+    - cron: '20 6 * * *'
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: 'Pass --apply (still needs REASSIGN_ARM=1 to actually write)'
+        required: false
+        default: 'false'
+
+concurrency:
+  group: reassign
+  cancel-in-progress: false
+
+jobs:
+  reassign:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install deps
+        working-directory: scripts
+        run: pip install -r requirements.txt
+
+      - name: Evaluate reassignments
+        working-directory: scripts
+        env:
+          SUPABASE_URL:         https://dqszbqiimbfvmmnpgpsb.supabase.co
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          HUBSPOT_TOKEN:        ${{ secrets.HUBSPOT_TOKEN }}
+          REASSIGN_ARM:         ${{ vars.REASSIGN_ARM }}
+        run: python3 reassign.py ${{ (github.event.inputs.apply == 'true' || vars.REASSIGN_ARM == '1') && '--apply' || '' }}

@@ -94,6 +94,12 @@ window.DATA = (() => {
       l.has_deal = !!l.has_deal;
       l.worked = !!l.worked;
       l.num_calls = l.num_calls || 0;
+      // HubSpot deal-stage win probability, 0..1 (null when no deal).
+      l.probability = (l.probability == null || l.probability === "") ? null : Number(l.probability);
+      // Out of farming area / "unqualified": suburb explicitly not farmed, or
+      // HubSpot's own "Not My Area" stage. Unknown (null map) is NOT out.
+      l.out_of_area = (l.in_farming_area === false) ||
+        (l.current_stage === (window.STAGES && STAGES.OUT_OF_AREA));
     }
     const syncMain = status.find(s => s.name === "leads_sync");
     const syncTeam = status.find(s => s.name === "team_activity_sync");
@@ -203,7 +209,7 @@ window.DATA = (() => {
   // the next sync backfills it).
   async function loadReassignmentCandidates() {
     const sb = client();
-    const cols = "deal_id, deal_name, current_stage, hubspot_owner_id, num_calls, hs_createdate, last_reassigned_at, reassign_hops";
+    const cols = "deal_id, deal_name, current_stage, hubspot_owner_id, num_calls, hs_createdate, last_reassigned_at, reassign_hops, reassign_visited";
     const PAGE = 1000;
     const rows = [];
     for (let from = 0; ; from += PAGE) {
@@ -223,6 +229,28 @@ window.DATA = (() => {
     return { ready: true, deals: rows };
   }
 
+  // Manually apply ONE reassignment (super/admin). Hands the deal + chosen
+  // target owner to the reassign-apply Edge Function, which does the real
+  // HubSpot move server-side and writes the audit row. Returns the summary
+  // { ok, from_team, to_team, contacts_patched, hop }.
+  async function applyReassignment(dealId, toOwnerId) {
+    const sb = client();
+    const { data: { session } } = await sb.auth.getSession();
+    if (!session) throw new Error("Not signed in");
+    const res = await fetch(`${QUAY.SUPABASE_URL}/functions/v1/reassign-apply`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${session.access_token}`,
+        "Content-Type": "application/json",
+        "apikey": QUAY.SUPABASE_ANON_KEY,
+      },
+      body: JSON.stringify({ deal_id: dealId, to_owner_id: toOwnerId }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+    return body;
+  }
+
   // Flip a single toggle (can_originate | can_receive | active) on one team.
   async function setTeamToggle(team, field, value) {
     const allowed = new Set(["can_originate", "can_receive", "active"]);
@@ -234,5 +262,5 @@ window.DATA = (() => {
     if (error) throw error;
   }
 
-  return { client, signIn, signOut, getSession, loadAll, invalidate, addNote, getDealCalls, triggerSync, loadReassignment, loadReassignmentCandidates, setTeamToggle, REASSIGN_STAGES };
+  return { client, signIn, signOut, getSession, loadAll, invalidate, addNote, getDealCalls, triggerSync, loadReassignment, loadReassignmentCandidates, setTeamToggle, applyReassignment, REASSIGN_STAGES };
 })();

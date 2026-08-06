@@ -20,6 +20,28 @@ window.VIEWS.overview = function (root, ctx) {
   const hasDeal = leads.filter(l => l.has_deal).length;
   const worked = leads.filter(l => l.worked).length;
 
+  // ── Cost per qualified lead (item: R80 per meta lead) ───────────────────
+  // Spend = (# meta-sourced leads) × R80. A META lead is "qualified" once
+  // its HubSpot deal reaches warm / hot / any mandate / sold. Cost per
+  // qualified = meta spend ÷ qualified META leads (same population, so the
+  // figure is honest and the % can't exceed 100). Matched source strings are
+  // surfaced so a wrong "meta" catch is obvious at a glance.
+  const metaLeads = leads.filter(l => STAGES.isMetaSource(l.source));
+  const metaSpend = metaLeads.length * STAGES.META_COST_PER_LEAD;
+  const qualifiedMeta = metaLeads.filter(l => STAGES.isQualified(l.current_stage));
+  const costPerQualified = qualifiedMeta.length ? metaSpend / qualifiedMeta.length : null;
+  const metaSourceNames = [...new Set(metaLeads.map(l => (l.source || "").trim()).filter(Boolean))];
+  const rand0 = v => "R" + Math.round(v).toLocaleString();
+  const overTarget = costPerQualified != null && costPerQualified > STAGES.QUALIFIED_TARGET_COST;
+
+  // ── Farming area (item: out-of-area = unqualified) ──────────────────────
+  // A lead is out of area when its suburb isn't in the farmed set (or it's in
+  // HubSpot's "Not My Area" stage). "Deals created" that count = has a deal
+  // AND is in area. Falls back to a hint until the division-area sheet loads.
+  const areaKnown = leads.some(l => l.in_farming_area != null);
+  const outOfArea = leads.filter(l => l.out_of_area).length;
+  const dealsInArea = leads.filter(l => l.has_deal && !l.out_of_area).length;
+
   function deltaPill(curr, prev) {
     if (!prev) return "";
     const change = curr - prev;
@@ -51,6 +73,49 @@ window.VIEWS.overview = function (root, ctx) {
       ${kpiCard("Has deal", hasDeal, pct(hasDeal, leads.length))}
       ${kpiCard("Worked", worked, pct(worked, leads.length))}
     </div>
+
+    <section class="card" style="margin-top: 16px;">
+      <h3>Cost per qualified lead</h3>
+      <p class="section-caption">
+        Meta leads costed at <strong>${rand0(STAGES.META_COST_PER_LEAD)}</strong> each.
+        <em>Qualified</em> = deal reached warm, hot, any mandate, or sold.
+        Reference target: <strong>${rand0(STAGES.QUALIFIED_TARGET_COST)}</strong> per qualified lead.
+      </p>
+      <div class="kpis" style="margin-top: 4px;">
+        ${kpiCard("Meta leads", metaLeads.length, `× ${rand0(STAGES.META_COST_PER_LEAD)} = ${rand0(metaSpend)} spend`)}
+        ${kpiCard("Qualified meta leads", qualifiedMeta.length, pct(qualifiedMeta.length, metaLeads.length))}
+        <div class="kpi" style="border-left:4px solid ${overTarget ? "#B91C1C" : THEME.tokens.green};">
+          <div class="label">Cost per qualified lead</div>
+          <div class="value">${costPerQualified == null ? "—" : rand0(costPerQualified)}</div>
+          <div class="delta-row muted small">${costPerQualified == null ? "no qualified leads yet" : (overTarget ? "over target" : "on/under target")}</div>
+        </div>
+      </div>
+      <p class="muted small" style="margin-top: 10px;">
+        Counted as meta from source: ${metaSourceNames.length ? metaSourceNames.map(s => `<code>${escapeHtml(s)}</code>`).join(" ") : "<em>none matched — tell me the exact Meta source label</em>"}
+      </p>
+    </section>
+
+    <section class="card" style="margin-top: 16px;">
+      <h3>Farming area</h3>
+      <p class="section-caption">
+        Leads outside our farmed suburbs (the division-area breakdown) are <strong>unqualified</strong>.
+        <em>Deals created</em> counts only deals inside the farming area.
+      </p>
+      ${areaKnown ? `
+      <div class="kpis" style="margin-top: 4px;">
+        ${kpiCard("Deals created (in area)", dealsInArea, pct(dealsInArea, hasDeal || 1) + " of all deals")}
+        <div class="kpi" style="border-left:4px solid #B91C1C;">
+          <div class="label">Out of area (unqualified)</div>
+          <div class="value">${outOfArea.toLocaleString()}</div>
+          <div class="delta-row muted small">${pct(outOfArea, leads.length)}</div>
+        </div>
+      </div>` : `
+      <div class="kpi" style="margin-top: 4px; border-left:4px solid ${THEME.tokens.yellowDeep};">
+        <div class="label">Not enabled yet</div>
+        <div class="value" style="font-size: 15px; font-weight: 600;">Awaiting suburb map</div>
+        <div class="delta-row muted small">Load the division-area breakdown sheet (farming_areas) to switch this on.</div>
+      </div>`}
+    </section>
 
     <div class="grid-2">
       <section class="card">

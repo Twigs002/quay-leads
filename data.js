@@ -101,11 +101,21 @@ window.DATA = (() => {
       l.out_of_area = (l.in_farming_area === false) ||
         (l.current_stage === (window.STAGES && STAGES.OUT_OF_AREA));
     }
+    // Whole-book pipeline value by stage (super/admin only; empty for others).
+    // Tolerate the table not existing yet so the dashboard keeps working before
+    // the 2026-08-06 migration is applied.
+    let stageValue = [];
+    try {
+      stageValue = await _allRows("pipeline_stage_value");
+    } catch (e) {
+      if (!_missingTable(e)) throw e;
+    }
     const syncMain = status.find(s => s.name === "leads_sync");
     const syncTeam = status.find(s => s.name === "team_activity_sync");
     _cache = {
       leads: enriched,
       teamActivity: teamActivity || [],
+      stageValue: stageValue || [],
       lastSync: syncMain ? syncMain.last_synced_at : null,
       syncOk: syncMain ? !!syncMain.ok : null,
       syncMessage: syncMain ? syncMain.message : null,

@@ -55,6 +55,33 @@ window.VIEWS.cfo = function (root, ctx) {
   const resolved = won.length + lost.length;
   const winRate  = resolved ? (won.length / resolved * 100) : 0;
 
+  // ── Whole-book pipeline value (pipeline_stage_value) ─────────────────────
+  // The lead-scoped figures above sum to ~R0 because seller-lead deals rarely
+  // carry an amount. This aggregate is the WHOLE default sales pipeline by
+  // stage (every deal with a value), so the section shows real money. It is
+  // NOT scoped by the dashboard filters. Falls back to the lead-scoped numbers
+  // until the aggregate table is populated by the sync.
+  const stageValue = (ctx.cache && ctx.cache.stageValue) || [];
+  const haveSV = stageValue.length > 0;
+  const openSV = stageValue.filter(r => r.is_open);
+  const svByStage = label => stageValue.find(r => r.stage === label) || null;
+  const svNum = (r, k) => (r ? Number(r[k]) || 0 : 0);
+  const svGross = openSV.reduce((a, r) => a + svNum(r, "gross"), 0);
+  const svWeighted = openSV.reduce((a, r) => a + svNum(r, "weighted"), 0);
+  const svOpenCount = openSV.reduce((a, r) => a + (r.deal_count || 0), 0);
+  const svWon = svByStage(STAGES.WON), svLost = svByStage(STAGES.LOST);
+
+  const pipeVal   = haveSV ? svGross : pipelineValue;
+  const pipeWtd   = haveSV ? svWeighted : weightedForecast;
+  const pipeOpenN = haveSV ? svOpenCount : openDeals.length;
+  const pipeWon   = haveSV && svWon ? svNum(svWon, "gross") : wonValue;
+  const pipeLost  = haveSV && svLost ? svNum(svLost, "gross") : lostValue;
+  const pipeWonN  = haveSV && svWon ? (svWon.deal_count || 0) : won.length;
+  const pipeLostN = haveSV && svLost ? (svLost.deal_count || 0) : lost.length;
+  const pipeResolved = pipeWonN + pipeLostN;
+  const pipeWinRate  = pipeResolved ? (pipeWonN / pipeResolved * 100) : 0;
+  const svUpdated = haveSV ? (stageValue[0].updated_at || "") : "";
+
   function money(label, value, sub, accent) {
     return `<div class="kpi"${accent ? ` style="border-left:4px solid ${accent};"` : ""}>
       <div class="label">${label}</div>
@@ -95,24 +122,25 @@ window.VIEWS.cfo = function (root, ctx) {
     </section>
 
     <section class="card" style="margin-top:16px;">
-      <h3>Live pipeline value (all sources)</h3>
+      <h3>Live pipeline value (whole book)</h3>
       <p class="section-caption">
-        <strong>Open pipeline</strong> is the gross value of deals still in play.
-        <strong>Weighted forecast</strong> multiplies each open deal by its HubSpot win probability.
+        <strong>Open pipeline</strong> is the gross value of every deal still in play across the
+        sales pipeline. <strong>Weighted forecast</strong> multiplies each open deal by its HubSpot
+        win probability.${haveSV ? ` This section is the whole deal book and is <strong>not</strong> narrowed by the filters above${svUpdated ? `, refreshed ${UTILS.escapeHtml(String(svUpdated).slice(0, 10))}` : ""}.` : " <em>Awaiting the first whole-book aggregate from the sync; showing seller-lead deals only for now.</em>"}
       </p>
       <div class="kpis" style="margin-top:4px;">
-        ${money("Open pipeline", randC(pipelineValue), `${openDeals.length.toLocaleString()} live deals`, THEME.tokens.blue)}
-        ${money("Weighted forecast", randC(weightedForecast), "probability-adjusted", green)}
-        ${money("Won revenue", randC(wonValue), `${won.length.toLocaleString()} sold`, green)}
-        ${money("Lost to competitor", randC(lostValue), `${lost.length.toLocaleString()} listed elsewhere`, red)}
-        ${money("Win rate", winRate.toFixed(0) + "%", `${resolved.toLocaleString()} resolved`)}
+        ${money("Open pipeline", randC(pipeVal), `${pipeOpenN.toLocaleString()} live deals`, THEME.tokens.blue)}
+        ${money("Weighted forecast", randC(pipeWtd), "probability-adjusted", green)}
+        ${money("Won revenue", randC(pipeWon), `${pipeWonN.toLocaleString()} sold`, green)}
+        ${money("Lost to competitor", randC(pipeLost), `${pipeLostN.toLocaleString()} listed elsewhere`, red)}
+        ${money("Win rate", pipeWinRate.toFixed(0) + "%", `${pipeResolved.toLocaleString()} resolved`)}
       </div>
     </section>
 
     <div class="grid-2" style="margin-top:16px;">
       <section class="card">
         <h3>Pipeline value by stage</h3>
-        <p class="section-caption">Gross value against the probability-weighted value, per open stage.</p>
+        <p class="section-caption">Gross value against the probability-weighted value, per open stage${haveSV ? " (whole book)" : ""}.</p>
         <div id="cfo-stage-chart" style="height:400px;"></div>
       </section>
       <section class="card">
@@ -124,28 +152,40 @@ window.VIEWS.cfo = function (root, ctx) {
   `;
 
   // ── Pipeline value by stage: gross vs weighted, chronological order ───────
-  const stageGross = {}, stageWeighted = {};
-  for (const l of openDeals) {
-    const s = l.current_stage;
-    const amt = Number(l.amount) || 0;
-    const p = (l.probability != null && !isNaN(l.probability)) ? l.probability : 0;
-    stageGross[s]    = (stageGross[s]    || 0) + amt;
-    stageWeighted[s] = (stageWeighted[s] || 0) + amt * p;
+  // Prefer the whole-book aggregate (open stages); fall back to the lead-scoped
+  // open deals until the aggregate is populated.
+  let stages, grossArr, weightedArr;
+  if (haveSV) {
+    const rows = openSV.slice().sort((a, b) => STAGES.orderIndex(a.stage) - STAGES.orderIndex(b.stage));
+    stages = rows.map(r => r.stage);
+    grossArr = rows.map(r => svNum(r, "gross"));
+    weightedArr = rows.map(r => svNum(r, "weighted"));
+  } else {
+    const g = {}, w = {};
+    for (const l of openDeals) {
+      const s = l.current_stage;
+      const amt = Number(l.amount) || 0;
+      const p = (l.probability != null && !isNaN(l.probability)) ? l.probability : 0;
+      g[s] = (g[s] || 0) + amt;
+      w[s] = (w[s] || 0) + amt * p;
+    }
+    stages = Object.keys(g).sort((a, b) => STAGES.orderIndex(a) - STAGES.orderIndex(b));
+    grossArr = stages.map(s => g[s]);
+    weightedArr = stages.map(s => w[s]);
   }
-  const stages = Object.keys(stageGross).sort((a, b) => STAGES.orderIndex(a) - STAGES.orderIndex(b));
-  if (stages.length) {
+  if (stages.length && grossArr.some(v => v > 0)) {
     Plotly.newPlot("cfo-stage-chart", [
       {
         type: "bar", orientation: "h", name: "Gross",
-        y: stages.map(s => s).reverse(),
-        x: stages.map(s => stageGross[s]).reverse(),
+        y: stages.slice().reverse(),
+        x: grossArr.slice().reverse(),
         marker: { color: THEME.tokens.blue },
         hovertemplate: "%{y}<br>gross %{x:,.0f}<extra></extra>",
       },
       {
         type: "bar", orientation: "h", name: "Weighted",
-        y: stages.map(s => s).reverse(),
-        x: stages.map(s => stageWeighted[s]).reverse(),
+        y: stages.slice().reverse(),
+        x: weightedArr.slice().reverse(),
         marker: { color: THEME.tokens.green },
         hovertemplate: "%{y}<br>weighted %{x:,.0f}<extra></extra>",
       },
@@ -156,7 +196,7 @@ window.VIEWS.cfo = function (root, ctx) {
     }, THEME.PLOTLY_CONFIG);
   } else {
     document.getElementById("cfo-stage-chart").innerHTML =
-      '<p class="muted" style="padding:24px 8px;">No open deals with a value in the current filters.</p>';
+      '<p class="muted" style="padding:24px 8px;">No open deals carry a value yet. Deal amounts are entered on a minority of deals in HubSpot; the whole-book total refreshes with the next sync.</p>';
   }
 
   // ── Won revenue by close month ───────────────────────────────────────────

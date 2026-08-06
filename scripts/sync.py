@@ -259,6 +259,57 @@ def fetch_deals(sess: requests.Session, deal_ids: Iterable[str]) -> tuple[list[d
     return out, failed
 
 
+def fetch_pipeline_value_by_stage(sess: requests.Session, labels: dict[str, str]) -> list[dict]:
+    """Aggregate the WHOLE default sales pipeline (every deal with amount > 0)
+    by stage: gross amount, probability-weighted amount, deal count, open flag.
+
+    Unlike hs_deal_state (seller-lead deals only), this walks the entire deal
+    book via the Search API so the CFO view can show real pipeline value. Best
+    effort: any error returns [] so it never breaks the core sync.
+    """
+    url = f"{HS_API}/crm/v3/objects/deals/search"
+    agg: dict[str, dict] = {}
+    after: str | None = None
+    try:
+        while True:
+            body = {
+                "filterGroups": [{"filters": [
+                    {"propertyName": "amount", "operator": "GT", "value": "0"},
+                    {"propertyName": "pipeline", "operator": "EQ", "value": "default"},
+                ]}],
+                "properties": ["dealstage", "amount", "hs_deal_stage_probability", "hs_is_closed"],
+                "limit": 100,
+            }
+            if after:
+                body["after"] = after
+            data = hs_request(sess, "POST", url, json=body)
+            for rec in (data or {}).get("results", []):
+                p = rec.get("properties") or {}
+                sid = p.get("dealstage")
+                amt = _to_float(p.get("amount")) or 0.0
+                prob = _to_float(p.get("hs_deal_stage_probability")) or 0.0
+                a = agg.setdefault(sid, {"gross": 0.0, "weighted": 0.0, "count": 0, "is_open": True})
+                a["gross"] += amt
+                a["weighted"] += amt * prob
+                a["count"] += 1
+                a["is_open"] = (p.get("hs_is_closed") == "false")
+            after = (((data or {}).get("paging") or {}).get("next") or {}).get("after")
+            if not after:
+                break
+    except Exception as exc:  # noqa: BLE001 - additive aggregate must never sink the sync
+        print(f"  ! pipeline_stage_value aggregate failed: {exc}")
+        return []
+    now = datetime.now(timezone.utc).isoformat()
+    return [{
+        "stage":      labels.get(sid, sid),
+        "is_open":    a["is_open"],
+        "gross":      round(a["gross"], 2),
+        "weighted":   round(a["weighted"], 2),
+        "deal_count": a["count"],
+        "updated_at": now,
+    } for sid, a in agg.items() if sid]
+
+
 def fetch_call_counts(sess: requests.Session, deal_ids: Iterable[str]) -> tuple[dict[str, int], dict[str, list[str]], set[str]]:
     """Return ({deal_id: count}, {deal_id: [call_id, ...]}, failed_ids).
 
@@ -447,6 +498,20 @@ def main():
         print("→ upserting hs_deal_state")
         n_deals = upsert_chunked(sb, "hs_deal_state", deal_rows, on_conflict="deal_id")
         print(f"  upserted {n_deals:,}")
+
+        # Whole-book pipeline value by stage (all default-pipeline deals with an
+        # amount, not just seller-lead deals) → pipeline_stage_value. Additive
+        # and self-contained; a failure here must not affect the rows above.
+        try:
+            print("→ aggregating whole-book pipeline value by stage")
+            stage_rows = fetch_pipeline_value_by_stage(sess, labels)
+            if stage_rows:
+                # Replace the whole table so stages absent this run don't linger.
+                sb.table("pipeline_stage_value").delete().neq("stage", "").execute()
+                n_sv = upsert_chunked(sb, "pipeline_stage_value", stage_rows, on_conflict="stage")
+                print(f"  pipeline_stage_value rows: {n_sv:,}")
+        except Exception as exc:  # noqa: BLE001
+            print(f"  ! pipeline_stage_value step skipped: {exc}")
 
         # Call details for the Track-tab per-lead history. We already have
         # deal_id → [call_id, ...] from fetch_call_counts; fetch each unique

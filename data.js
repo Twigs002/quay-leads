@@ -100,6 +100,15 @@ window.DATA = (() => {
       // HubSpot's own "Not My Area" stage. Unknown (null map) is NOT out.
       l.out_of_area = (l.in_farming_area === false) ||
         (l.current_stage === (window.STAGES && STAGES.OUT_OF_AREA));
+      // How the deal was created. Auto-created = the Dialfire→n8n pipe
+      // (source INTEGRATION / detail n8n.cloud); manual = CRM_UI. null until the
+      // next sync backfills it. deal_creation: 'auto' | 'manual' | 'other' | null
+      const src = (l.deal_source || "").toString();
+      const det = (l.deal_source_detail || "").toString().toLowerCase();
+      l.deal_creation = !l.has_deal || !src ? null
+        : (det.includes("n8n") || src === "INTEGRATION") ? "auto"
+        : (src === "CRM_UI") ? "manual"
+        : "other";
     }
     // Whole-book pipeline value by stage (super/admin only; empty for others).
     // Tolerate the table not existing yet so the dashboard keeps working before

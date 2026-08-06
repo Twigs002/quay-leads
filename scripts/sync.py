@@ -47,6 +47,11 @@ HS_PROPS = [
     "hs_lastmodifieddate", "hubspot_owner_id", "pipeline",
     "hs_deal_stage_probability",
     "hs_createdate",  # 72h reassignment clock origin
+    # How the deal was created. Auto-created deals come through the Dialfire→n8n
+    # pipe and read source_label=INTEGRATION, detail_1=n8n.cloud; manual deals
+    # read CRM_UI. Lets the dashboard split auto (n8n) vs manual.
+    "hs_object_source_label",
+    "hs_object_source_detail_1",
 ]
 BATCH = 100
 THROTTLE_S = 0.35  # ~3 req/s — well under HubSpot's 10/s sustained
@@ -255,6 +260,8 @@ def fetch_deals(sess: requests.Session, deal_ids: Iterable[str]) -> tuple[list[d
                 "pipeline":          p.get("pipeline"),
                 "probability":       _to_float(p.get("hs_deal_stage_probability")),
                 "hs_createdate":     p.get("hs_createdate"),
+                "hs_object_source":  p.get("hs_object_source_label"),
+                "hs_object_source_detail": p.get("hs_object_source_detail_1"),
             })
     return out, failed
 

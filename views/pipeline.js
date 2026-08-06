@@ -42,6 +42,16 @@ window.VIEWS.pipeline = function (root, ctx) {
   const winRate   = totalSold ? (soldUs.length / totalSold * 100) : 0;
   const randMoney = v => v ? "R" + v.toLocaleString(undefined, { maximumFractionDigits: 0 }) : "R0";
 
+  // Deal creation source (Option B): auto = the Dialfire→n8n pipe
+  // (HubSpot record source n8n.cloud / INTEGRATION), manual = CRM UI. Backfilled
+  // by the sync; until then deal_creation is null and this reads "awaiting sync".
+  const dealLeads = withDeal;
+  const creationKnown = dealLeads.some(l => l.deal_creation != null);
+  const cAuto = dealLeads.filter(l => l.deal_creation === "auto").length;
+  const cManual = dealLeads.filter(l => l.deal_creation === "manual").length;
+  const cOther = dealLeads.filter(l => l.deal_creation === "other").length;
+  const cPct = n => dealLeads.length ? Math.round(n / dealLeads.length * 100) + "%" : "0%";
+
   // Division leaderboard
   const board = {};
   for (const l of leads) {
@@ -117,6 +127,38 @@ window.VIEWS.pipeline = function (root, ctx) {
           <div class="delta-row muted small">${totalSold.toLocaleString()} resolved</div>
         </div>
       </div>
+    </section>
+
+    <section class="card">
+      <h3>How deals were created</h3>
+      <p class="section-caption">
+        <strong>Auto</strong> = created by the Dialfire → n8n pipe (HubSpot record source <code>n8n.cloud</code>).
+        <strong>Manual</strong> = created by hand in the HubSpot UI. HubSpot has no dedicated "Dialfire" marker,
+        so n8n is the proxy for the automated pipe. Over the ${dealLeads.length.toLocaleString()} deals in view.
+      </p>
+      ${creationKnown ? `
+      <div class="kpis" style="margin-top: 4px;">
+        <div class="kpi" style="border-left:4px solid ${THEME.tokens.blue};">
+          <div class="label">Auto (n8n pipe)</div>
+          <div class="value">${cAuto.toLocaleString()}</div>
+          <div class="delta-row muted small">${cPct(cAuto)} of deals</div>
+        </div>
+        <div class="kpi" style="border-left:4px solid ${THEME.tokens.yellowDeep};">
+          <div class="label">Manual (CRM UI)</div>
+          <div class="value">${cManual.toLocaleString()}</div>
+          <div class="delta-row muted small">${cPct(cManual)} of deals</div>
+        </div>
+        <div class="kpi">
+          <div class="label">Other source</div>
+          <div class="value">${cOther.toLocaleString()}</div>
+          <div class="delta-row muted small">${cPct(cOther)} of deals</div>
+        </div>
+      </div>` : `
+      <div class="kpi" style="margin-top: 4px; border-left:4px solid ${THEME.tokens.yellowDeep};">
+        <div class="label">Awaiting sync</div>
+        <div class="value" style="font-size: 15px; font-weight: 600;">Record source not backfilled yet</div>
+        <div class="delta-row muted small">Runs on the next sync (now pulls hs_object_source). Trigger one to populate.</div>
+      </div>`}
     </section>
 
     <section>

@@ -59,6 +59,19 @@ window.STAGES = (() => {
   const QUALIFIED_TARGET_COST = 5000; // R reference line ("R5k")
   const COMMISSION_RATE = 0.042;    // average commission we earn on a sale (4.2%)
 
+  // Outbound calling (Dialfire) monthly running cost. Two assumptions the user
+  // owns (adjust here and every view follows): the caller team's salaries, and
+  // the dialer + telephony spend (~R45-50k, midpoint used). A "Dialfire lead"
+  // is a deal the calling pipe auto-creates (deal_creation === 'auto'), so the
+  // cost per Dialfire lead = this monthly cost / auto deals produced that month.
+  const CALLER_SALARIES_MONTHLY = 310000;   // R/month, outbound caller salaries
+  const CALLING_COST_MONTHLY    = 47500;    // R/month, dialer + telephony (~R45-50k)
+  const DIALFIRE_MONTHLY_COST   = CALLER_SALARIES_MONTHLY + CALLING_COST_MONTHLY;
+  // Fallback monthly Dialfire-lead volume, used only until deal_created dates
+  // reach the browser (migration + reload). Measured 2026-08-06 as the mean of
+  // the last 3 complete months (May 226, Jun 322, Jul 300 auto deals).
+  const DIALFIRE_LEADS_PER_MONTH_FALLBACK = 283;
+
   // Sort key: known stages by pipeline order, unknowns after, "No deal yet"
   // last of all. Used as `arr.sort((a,b)=>orderIndex(a)-orderIndex(b))`.
   function orderIndex(stage) {
@@ -77,6 +90,8 @@ window.STAGES = (() => {
   return {
     ORDER, QUALIFIED, WON, LOST, NURTURE, OUT_OF_AREA, MANDATE, COMPETITOR_LOST,
     META_SOURCE_RE, META_COST_PER_LEAD, QUALIFIED_TARGET_COST, COMMISSION_RATE,
+    CALLER_SALARIES_MONTHLY, CALLING_COST_MONTHLY, DIALFIRE_MONTHLY_COST,
+    DIALFIRE_LEADS_PER_MONTH_FALLBACK,
     orderIndex, isQualified, isMetaSource, isMandate, isWonListing, isLost,
   };
 })();

@@ -96,6 +96,44 @@ window.VIEWS.costings = function (root, ctx) {
     return p.toFixed(1) + "%";
   };
 
+  // ── Cost per Dialfire lead ────────────────────────────────────────────────
+  // The outbound calling operation has its own economics, separate from Meta's
+  // R80. Monthly cost = caller salaries + dialer/telephony. The unit it produces
+  // is a Dialfire-sourced deal (deal_creation === 'auto', the n8n pipe). Volume
+  // is measured live over the last 3 complete months from the WHOLE book (not the
+  // filtered view) so the rate stays stable; falls back to a measured constant
+  // until deal_created dates reach the browser.
+  const allLeads = (ctx.cache && ctx.cache.leads) || leads;
+  const dfSalaries = STAGES.CALLER_SALARIES_MONTHLY;
+  const dfCalling  = STAGES.CALLING_COST_MONTHLY;
+  const dfMonthly  = STAGES.DIALFIRE_MONTHLY_COST;
+  const dfAutoTotal = allLeads.filter(l => l.deal_creation === "auto").length;
+
+  // Auto deals bucketed by create-month, deduped by deal_id, current partial
+  // month dropped so we only average completed months.
+  const dfByMonth = {};
+  const dfSeen = new Set();
+  for (const l of allLeads) {
+    if (l.deal_creation !== "auto" || !l.deal_created_d) continue;
+    const id = l.deal_id || l.email;
+    if (dfSeen.has(id)) continue;
+    dfSeen.add(id);
+    const d = l.deal_created_d;
+    const k = d.getFullYear() * 12 + d.getMonth();
+    dfByMonth[k] = (dfByMonth[k] || 0) + 1;
+  }
+  const _now = new Date();
+  const curK = _now.getFullYear() * 12 + _now.getMonth();
+  const dfLast3 = Object.keys(dfByMonth).map(Number).filter(k => k < curK).sort((a, b) => b - a).slice(0, 3);
+  const dfLive = dfLast3.length ? Math.round(dfLast3.reduce((a, k) => a + dfByMonth[k], 0) / dfLast3.length) : 0;
+  const dfLiveMeasured = dfLive > 0;   // true = from real create dates; false = fallback constant
+  const dfPerMonth = dfLive || STAGES.DIALFIRE_LEADS_PER_MONTH_FALLBACK;
+  const costPerDf = dfPerMonth ? dfMonthly / dfPerMonth : null;
+  // A Dialfire deal is already qualified, so break-even conversion from one =
+  // its cost / average commission on a sale.
+  const dfBreakEven = avgCommission ? costPerDf / avgCommission : null;
+  const dfLeadsPerSale = costPerDf ? Math.round(avgCommission / costPerDf) : null;
+
   function card(label, value, sub, accent) {
     return `<div class="kpi"${accent ? ` style="border-left:4px solid ${accent};"` : ""}>
       <div class="label">${label}</div>
@@ -160,6 +198,37 @@ window.VIEWS.costings = function (root, ctx) {
         ${card("Meta lead", randS(COST), "what we pay per Meta / Facebook lead", yellow)}
         ${card("Average commission", ratePct, "of the sale price, on a successful sale", blue)}
       </div>
+    </section>
+
+    <section class="card" style="margin-top:16px;">
+      <h3>Cost per Dialfire lead</h3>
+      <p class="section-caption">
+        What the outbound calling operation costs to produce one lead. A
+        <strong>Dialfire lead</strong> is a deal the calling pipe auto-creates
+        (${grp(dfAutoTotal)} in the book). Monthly cost &divide; deals produced that month${dfLiveMeasured
+          ? `, averaged over the last ${dfLast3.length} complete month${dfLast3.length === 1 ? "" : "s"}`
+          : ` (measured ${grp(dfPerMonth)}/mo until create dates sync)`}.
+      </p>
+      <div class="kpis" style="margin-top:4px;">
+        ${card("Caller salaries", randS(dfSalaries), "per month", yellow)}
+        ${card("Calling / telephony", randS(dfCalling), "per month &middot; dialer + lines", yellow)}
+        ${card("Total monthly cost", randS(dfMonthly), "salaries + calling", blue)}
+        ${card("Dialfire leads / month", grp(dfPerMonth), dfLiveMeasured ? "live &middot; last 3 complete months" : "measured estimate", blue)}
+        ${card("Cost per Dialfire lead", costPerDf == null ? "--" : randS(costPerDf), `${randS(dfMonthly)} &divide; ${grp(dfPerMonth)} deals`, green)}
+      </div>
+      <div class="card" style="padding:14px 18px; margin:12px 0 0; border-left:4px solid ${blue}; background:var(--paper,#f6f8fc);">
+        A Dialfire lead costs <strong>${costPerDf == null ? "--" : randS(costPerDf)}</strong> versus
+        <strong>${randS(COST)}</strong> for a raw Meta lead, but they are different units: Meta buys a raw
+        inbound enquiry, while a Dialfire lead is already a human-qualified deal. Against an average
+        ${randS(avgSalePrice)} sale (${randS(avgCommission)} commission), one Dialfire lead only needs a
+        <strong>${dfBreakEven == null ? "--" : pctFmt(dfBreakEven)}</strong> conversion to break even
+        (about <strong>1 sale per ${dfLeadsPerSale == null ? "--" : grp(dfLeadsPerSale)} Dialfire leads</strong>).
+      </div>
+      <p class="muted small" style="margin-top:10px;">
+        Salaries (${randS(dfSalaries)}) and calling (${randS(dfCalling)}) are set assumptions; tell me the
+        exact figures and I'll lock them in. Volume counts auto-created (n8n pipe) deals; not every one is strictly
+        Dialfire if other automations also create deals.
+      </p>
     </section>
 
     <section class="card" style="margin-top:16px;">

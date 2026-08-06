@@ -109,6 +109,10 @@ window.DATA = (() => {
         : (det.includes("n8n") || src === "INTEGRATION") ? "auto"
         : (src === "CRM_UI") ? "manual"
         : "other";
+      // When the deal was created (drives live Dialfire monthly volume on
+      // Costings). null until the deal_created migration + a reload land it.
+      const dc = l.deal_created ? new Date(l.deal_created) : null;
+      l.deal_created_d = dc && !isNaN(dc) ? dc : null;
     }
     // Whole-book pipeline value by stage (super/admin only; empty for others).
     // Tolerate the table not existing yet so the dashboard keeps working before

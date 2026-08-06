@@ -1,10 +1,8 @@
 // Suburb sales reference data — average sale prices per suburb.
 // ============================================================================
-// PLACEHOLDER. Right now this holds a single sample row so the Costings page
-// renders. When the real numbers are ready we map the full "average sales
-// price per suburb" set in here (or swap this file for a Supabase-backed
-// fetch). Store RAW numbers only — the Costings view formats them for display,
-// so real data drops straight in.
+// Real, mapped data. Vredehoek below is accurate; append one row per suburb as
+// the numbers come in (or swap this file for a Supabase-backed fetch). Store
+// RAW numbers only — the Costings view formats them for display.
 //
 // Type codes: FT = Freehold Title, ST = Sectional Title.
 // Fields: 2025 avg price, total spend (rand traded), number of sales, median
@@ -12,9 +10,8 @@
 window.SUBURB_SALES = (() => {
   const YEAR = 2025;
 
-  // true while these are sample numbers, not the mapped data set. The view
-  // shows a clear "placeholder" banner until this flips to false.
-  const PLACEHOLDER = true;
+  // false = these are the real mapped numbers (drops the "placeholder" badge).
+  const PLACEHOLDER = false;
 
   const ROWS = [
     {

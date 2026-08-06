@@ -36,6 +36,27 @@ window.VIEWS.cfo = function (root, ctx) {
   const roi           = metaSpend ? metaWonValue / metaSpend : null;
   const metaSourceNames = [...new Set(metaLeads.map(l => (l.source || "").trim()).filter(Boolean))];
 
+  // ── Meta spend vs projected commission (Costings suburb-value model) ──────
+  // Match each Meta lead to its suburb + title-type average sale (House -> FT,
+  // Apt/Flat -> ST) and value it at our commission rate. Potential assumes every
+  // matched lead converts (upper bound); the deals figure is the same for meta
+  // leads that already carry a HubSpot deal. Ties the Costings page to spend.
+  const RATE = STAGES.COMMISSION_RATE;
+  const ratePct = (RATE * 100).toFixed(1) + "%";
+  const SS = window.SUBURB_SALES;
+  let matchedMeta = 0, matchedMetaDeals = 0, potMetaComm = 0, potMetaDealComm = 0;
+  if (SS && SS.find) {
+    for (const l of metaLeads) {
+      const srow = SS.find(l.suburb, l.property_type);
+      if (!srow) continue;
+      matchedMeta++;
+      const c = (Number(srow.avg_price) || 0) * RATE;
+      potMetaComm += c;
+      if (l.has_deal) { matchedMetaDeals++; potMetaDealComm += c; }
+    }
+  }
+  const projReturn = metaSpend ? potMetaComm / metaSpend : null;
+
   // ── Total pipeline &amp; revenue (all sources) ──────────────────────────────
   // Open = has a deal in a live stage (not sold, lost, or otherwise closed).
   // Weighted forecast multiplies each open deal by its HubSpot win probability.
@@ -119,6 +140,35 @@ window.VIEWS.cfo = function (root, ctx) {
       <p class="muted small" style="margin-top:10px;">
         Counted as meta from source: ${metaSourceNames.length ? metaSourceNames.map(s => `<code>${UTILS.escapeHtml(s)}</code>`).join(" ") : "<em>none matched. Tell me the exact Meta source label.</em>"}
       </p>
+    </section>
+
+    <section class="card" style="margin-top:16px;">
+      <h3>Spend vs projected commission</h3>
+      <p class="section-caption">
+        The two sides side by side: what we <strong>pay</strong> for Meta leads (${rand(STAGES.META_COST_PER_LEAD)} each) against
+        what they could <strong>earn</strong>. Each Meta lead is matched to its suburb + title-type average sale
+        (<strong>House &rarr; FT</strong>, <strong>Apartment / Flat &rarr; ST</strong>) and valued at our
+        <strong>${ratePct}</strong> commission. Potential assumes every matched lead converts, so it is an
+        upper bound &mdash; see the <a href="#/costings">Costings</a> tab for the full model.
+      </p>
+      ${matchedMeta ? `
+      <div class="model-flow card" style="display:flex; flex-wrap:wrap; align-items:center; gap:12px; padding:16px 18px; margin:4px 0 12px; background:var(--paper, #f6f8fc);">
+        <span style="font-weight:800; font-size:20px; color:${yellow};">${randC(metaSpend)}</span>
+        <span class="muted">spend on ${metaLeads.length.toLocaleString()} Meta leads</span>
+        <span style="font-size:20px; color:var(--slate,#64748b);">&rarr;</span>
+        <span class="muted">${matchedMeta.toLocaleString()} matched to a suburb value</span>
+        <span style="font-size:20px; color:var(--slate,#64748b);">&rarr;</span>
+        <span style="font-weight:800; font-size:20px; color:${green};">${randC(potMetaComm)}</span>
+        <span class="muted">potential commission</span>
+      </div>` : ""}
+      <div class="kpis" style="margin-top:4px;">
+        ${money("Meta spend", randC(metaSpend), `${metaLeads.length.toLocaleString()} leads &times; ${rand(STAGES.META_COST_PER_LEAD)}`, yellow)}
+        ${money("Matched to a suburb value", matchedMeta.toLocaleString(), `${matchedMetaDeals.toLocaleString()} already have a deal`, THEME.tokens.blue)}
+        ${money("Potential commission", randC(potMetaComm), "if every matched meta lead sold", green)}
+        ${money("Projected return", projReturn == null || !matchedMeta ? "--" : (projReturn.toFixed(0) + "&times;"), "potential commission / spend", green)}
+        ${money("From matched deals", randC(potMetaDealComm), "if every matched meta deal sold", green)}
+      </div>
+      ${!matchedMeta ? `<p class="muted small" style="margin-top:10px;">No Meta leads in view match a mapped suburb + type yet. Map more suburbs on the <a href="#/costings">Costings</a> tab.</p>` : ""}
     </section>
 
     <section class="card" style="margin-top:16px;">

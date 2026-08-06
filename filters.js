@@ -10,6 +10,10 @@ window.FILTERS = (() => {
     sources: new Set(),
     leadTypes: new Set(),
     noDealOnly: false,
+    // Where the lead originated: null = all, "dialfire" = deal auto-created by
+    // the calling pipe (deal_creation === 'auto'), "slb" = everything else
+    // (came in through the Seller Lead Bank sheet, not the Dialfire pipe).
+    leadOrigin: null,
   };
   const listeners = [];
 
@@ -197,12 +201,32 @@ window.FILTERS = (() => {
       notify();
     });
 
+    // Lead source segmented control (All / Dialfire / Seller Lead Bank).
+    const $origin = document.getElementById("lead-origin");
+    function reflectOrigin() {
+      if (!$origin) return;
+      const key = state.leadOrigin || "all";
+      $origin.querySelectorAll("button").forEach(b =>
+        b.classList.toggle("active", b.dataset.origin === key));
+    }
+    if ($origin) {
+      $origin.addEventListener("click", (e) => {
+        const btn = e.target.closest("button[data-origin]");
+        if (!btn) return;
+        state.leadOrigin = btn.dataset.origin === "all" ? null : btn.dataset.origin;
+        reflectOrigin();
+        notify();
+      });
+    }
+
     $nodeal.addEventListener("change", () => {
       state.noDealOnly = $nodeal.checked; notify();
     });
     $reset.addEventListener("click", () => {
       state.divisions.clear(); state.sources.clear(); state.leadTypes.clear();
       state.noDealOnly = false;
+      state.leadOrigin = null;
+      reflectOrigin();
       $nodeal.checked = false;
       document.querySelectorAll(".multi-list input[type=checkbox]")
         .forEach(cb => cb.checked = false);
@@ -217,6 +241,7 @@ window.FILTERS = (() => {
     });
 
     reflectRange();
+    reflectOrigin();
     refreshInput();
 
     // Click outside any open dropdown to close it.
@@ -235,6 +260,8 @@ window.FILTERS = (() => {
       if (state.sources.size && !state.sources.has(l.source)) return false;
       if (state.leadTypes.size && !state.leadTypes.has(l.is_lead)) return false;
       if (state.noDealOnly && l.has_deal) return false;
+      if (state.leadOrigin === "dialfire" && l.deal_creation !== "auto") return false;
+      if (state.leadOrigin === "slb" && l.deal_creation === "auto") return false;
       return true;
     });
   }

@@ -64,7 +64,7 @@ window.STAGES = (() => {
   // the dialer + telephony spend (~R45-50k, midpoint used). A "Dialfire lead"
   // is a deal the calling pipe auto-creates (deal_creation === 'auto'), so the
   // cost per Dialfire lead = this monthly cost / auto deals produced that month.
-  const CALLER_SALARIES_MONTHLY = 310000;   // R/month, outbound caller salaries
+  const CALLER_SALARIES_MONTHLY = 398000;   // R/month, outbound caller salaries
   const CALLING_COST_MONTHLY    = 47500;    // R/month, dialer + telephony (~R45-50k)
   const DIALFIRE_MONTHLY_COST   = CALLER_SALARIES_MONTHLY + CALLING_COST_MONTHLY;
   // Fallback monthly Dialfire-lead volume, used only until deal_created dates

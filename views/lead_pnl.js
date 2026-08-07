@@ -1,7 +1,7 @@
 // Lead P&L - the lead-by-lead journey. For each lead: where it came from
 // (Dialfire / Meta / Seller Lead Bank), what it cost us, where it sits in
-// HubSpot, whether it sold (matched in the commission register) and the Quay 1
-// commission we banked off it. Search any lead to trace one deal end to end.
+// HubSpot, whether it sold (matched in the commission register) and the total
+// agency commission it generated. Search any lead to trace one deal end to end.
 // Super/admin only.
 window.VIEWS = window.VIEWS || {};
 window.VIEWS["lead-pnl"] = function (root, ctx) {
@@ -57,7 +57,7 @@ window.VIEWS["lead-pnl"] = function (root, ctx) {
     const sale = l.deal_id ? saleBy.get(String(l.deal_id)) : null;
     const status = sale ? sale.deal_status : null;
     const sold = status === "PAID_OUT";
-    const comm = sold ? (Number(sale.quay1_gross_comm) || 0) : 0;
+    const comm = sold ? (Number(sale.total_gross_comm) || 0) : 0;
     const cost = costFor(l);
     let result;
     if (sold) result = "Sold";
@@ -126,7 +126,7 @@ window.VIEWS["lead-pnl"] = function (root, ctx) {
       </p>
       <div class="kpis" style="margin-top:4px;">
         ${card("Leads that sold", grp(soldRows.length), "traced lead → paid sale", green)}
-        ${card("Commission from them", randS(trackedComm), "Quay 1 share banked", green)}
+        ${card("Commission from them", randS(trackedComm), "total agency commission", green)}
         ${card("Dialfire", randS(byOrigin.Dialfire.comm), `${grp(byOrigin.Dialfire.n)} sold`, blue)}
         ${card("Meta + Seller Lead Bank", randS(byOrigin.Meta.comm + byOrigin["Seller Lead Bank"].comm), `${grp(byOrigin.Meta.n + byOrigin["Seller Lead Bank"].n)} sold`, blue)}
       </div>

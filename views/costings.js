@@ -1,7 +1,8 @@
 // Costings view - the plain-English money model behind a lead. What a lead
-// costs (Meta = R80), what a sale earns us (Quay keeps ~2.0% after the broker
-// payoff when an R80 lead converts, and the live deals matched to a suburb's
-// average sale price by suburb + title type. Super/admin only.
+// costs (Meta = R80), what a sale earns (total agency commission, ~4.2% of the
+// sale price, measured from the register) when an R80 lead converts, and the
+// live deals matched to a suburb's average sale by suburb + title type.
+// Super/admin only.
 window.VIEWS = window.VIEWS || {};
 window.VIEWS.costings = function (root, ctx) {
   // Gate: super/admin only, matching the CFO view.
@@ -18,20 +19,18 @@ window.VIEWS.costings = function (root, ctx) {
   const naCell = v => (v == null || v === "") ? '<span class="muted">n/a</span>' : randS(v);
 
   const COST = STAGES.META_COST_PER_LEAD;       // R80
-  const RATE = STAGES.COMMISSION_RATE;          // 0.042 total agency (headline)
-  const QRATE = STAGES.QUAY_COMMISSION_RATE;    // ~0.02 Quay retained (what we bank)
+  const RATE = STAGES.COMMISSION_RATE;          // 0.042 total agency commission
   const ratePct = (RATE * 100).toFixed(1) + "%";
-  const qratePct = (QRATE * 100).toFixed(1) + "%";
 
   const sales = window.SUBURB_SALES || { ROWS: [], YEAR: 2025, PLACEHOLDER: false, find: () => null };
   const rows = sales.ROWS || [];
 
-  // Quay 1's banked commission for a suburb row: prefer the REAL registered
-  // average (avg_q1_comm from actual paid sales), else estimate from the retained
-  // rate. Every projection uses this so the model matches the money we keep.
-  const rowComm = r => (r && r.avg_q1_comm != null)
-    ? Number(r.avg_q1_comm)
-    : (Number(r && r.avg_price) || 0) * QRATE;
+  // Total agency commission for a suburb row: prefer the REAL registered average
+  // (avg_comm from actual paid sales), else estimate from the agency rate. Every
+  // projection uses this so the model matches the commission the deals generate.
+  const rowComm = r => (r && r.avg_comm != null)
+    ? Number(r.avg_comm)
+    : (Number(r && r.avg_price) || 0) * RATE;
 
   // Reference average sale price = sales-weighted mean across rows that carry a
   // sales count (rows with only avg_price don't distort it). Falls back to 0.
@@ -73,16 +72,16 @@ window.VIEWS.costings = function (root, ctx) {
   const metaMandate = metaLeads.filter(l => STAGES.isWonListing(l.current_stage)).length;
   const metaSold = metaLeads.filter(l => l.current_stage === STAGES.WON).length;
 
-  // Average Quay-retained commission per sale: use the REAL banked commission of
-  // the suburbs where our Meta leads actually are (rowComm = registered
-  // avg_q1_comm), else the reference average at the retained rate.
+  // Average agency commission per sale: use the REAL registered commission of the
+  // suburbs where our Meta leads actually are (rowComm = registered avg_comm),
+  // else the reference average at the agency rate.
   let mSum = 0, mCnt = 0, mComm = 0;
   for (const l of metaLeads) {
     const r = sales.find ? sales.find(l.suburb, l.property_type) : null;
     if (r) { mSum += Number(r.avg_price) || 0; mComm += rowComm(r); mCnt++; }
   }
   const avgSalePrice = mCnt ? mSum / mCnt : refAvgPrice;
-  const avgCommission = mCnt ? mComm / mCnt : refAvgPrice * QRATE;
+  const avgCommission = mCnt ? mComm / mCnt : refAvgPrice * RATE;
 
   const breakEvenRate = avgCommission ? COST / avgCommission : null;   // fraction
   const leadsPerSale = avgCommission ? Math.round(avgCommission / COST) : null;
@@ -156,11 +155,11 @@ window.VIEWS.costings = function (root, ctx) {
   // ── Suburb reference table ────────────────────────────────────────────────
   const cols = ["Team", "Suburb", "Type", `${sales.YEAR} Avg. Price`, "Total Spend", "No. of Sales",
     "Median Price", "Avg. R/m&sup2;", "Avg. Days on Market",
-    "Avg. Quay commission", "R80 leads / sale"];
+    "Avg. agency commission", "R80 leads / sale"];
   const numFrom = 3; // columns index >= 3 are right-aligned numbers
   const suburbBody = rows.length
     ? rows.map(r => {
-        const comm = rowComm(r);   // real banked commission where available, else retained-rate estimate
+        const comm = rowComm(r);   // real registered commission where available, else agency-rate estimate
         const funds = comm ? Math.round(comm / COST) : 0;
         const daysCell = r.avg_days_on_market == null ? '<span class="muted">n/a</span>' : grp(r.avg_days_on_market);
         return `<tr>
@@ -205,7 +204,7 @@ window.VIEWS.costings = function (root, ctx) {
       <p class="section-caption">The two inputs behind every projection on this page.</p>
       <div class="kpis" style="margin-top:4px;">
         ${card("Meta lead", randS(COST), "what we pay per Meta / Facebook lead", yellow)}
-        ${card("Quay commission", qratePct, `what Quay 1 keeps per sale (total agency ${ratePct})`, blue)}
+        ${card("Agency commission", ratePct, "total commission per sale (measured from the register)", blue)}
       </div>
     </section>
 
@@ -244,8 +243,8 @@ window.VIEWS.costings = function (root, ctx) {
       <h3>Break-even &amp; expected value</h3>
       <p class="section-caption">
         The decision number: at <strong>${randS(COST)}</strong> a Meta lead and
-        <strong>${randS(avgCommission)}</strong> Quay commission on an average
-        <strong>${randS(avgSalePrice)}</strong> sale (${qratePct} retained), we break even when just
+        <strong>${randS(avgCommission)}</strong> agency commission on an average
+        <strong>${randS(avgSalePrice)}</strong> sale (${ratePct}), we break even when just
         <strong>${breakEvenRate == null ? "--" : pctFmt(breakEvenRate)}</strong> of leads convert
         (about <strong>1 sale per ${leadsPerSale == null ? "--" : grp(leadsPerSale)} leads</strong>).
         Conversion below is measured from the ${grp(metaN)} Meta leads in view.
@@ -302,8 +301,8 @@ window.VIEWS.costings = function (root, ctx) {
     <section class="card" style="margin-top:16px;">
       <h3>Average sale price by suburb${sales.PLACEHOLDER ? ` &middot; <span class="pill" style="background:#FEF3C7;color:#92400E;">placeholder</span>` : ""}</h3>
       <p class="section-caption">
-        Real suburb averages from the commission register. <strong>Avg. Quay commission</strong> is the actual
-        average Quay 1 banked per sale there (falling back to ${qratePct} of price for any suburb not yet mapped).
+        Real suburb averages from the commission register. <strong>Avg. agency commission</strong> is the actual
+        average total commission per sale there (falling back to ${ratePct} of price for any suburb not yet mapped).
       </p>
       <div class="table-wrap"><table class="dt">
         <thead><tr>${cols.map((c, i) => `<th${i >= numFrom ? ' class="num"' : ""}>${c}</th>`).join("")}</tr></thead>

@@ -38,13 +38,13 @@ window.VIEWS.cfo = function (root, ctx) {
 
   // ── Meta spend vs projected commission (Costings suburb-value model) ──────
   // Match each Meta lead to its suburb + title-type average sale (House -> FT,
-  // Apt/Flat -> ST) and value it at Quay's RETAINED commission (real banked
-  // avg_q1_comm per suburb, else the retained rate). Potential assumes every
-  // matched lead converts (upper bound); the deals figure is the same for meta
-  // leads that already carry a HubSpot deal. Ties the Costings page to spend.
-  const QRATE = STAGES.QUAY_COMMISSION_RATE;
-  const ratePct = (QRATE * 100).toFixed(1) + "%";
-  const rowComm = r => (r && r.avg_q1_comm != null) ? Number(r.avg_q1_comm) : (Number(r && r.avg_price) || 0) * QRATE;
+  // Apt/Flat -> ST) and value it at the total agency commission (real registered
+  // avg_comm per suburb, else the agency rate). Potential assumes every matched
+  // lead converts (upper bound); the deals figure is the same for meta leads that
+  // already carry a HubSpot deal. Ties the Costings page to spend.
+  const RATE = STAGES.COMMISSION_RATE;
+  const ratePct = (RATE * 100).toFixed(1) + "%";
+  const rowComm = r => (r && r.avg_comm != null) ? Number(r.avg_comm) : (Number(r && r.avg_price) || 0) * RATE;
   const SS = window.SUBURB_SALES;
   let matchedMeta = 0, matchedMetaDeals = 0, potMetaComm = 0, potMetaDealComm = 0;
   if (SS && SS.find) {
@@ -150,8 +150,8 @@ window.VIEWS.cfo = function (root, ctx) {
         The two sides side by side: what we <strong>pay</strong> for Meta leads (${rand(STAGES.META_COST_PER_LEAD)} each) against
         what they could <strong>earn</strong>. Each Meta lead is matched to its suburb + title-type average sale
         (<strong>House &rarr; FT</strong>, <strong>Apartment / Flat &rarr; ST</strong>) and valued at
-        <strong>Quay's retained commission</strong> (real banked average per suburb, about ${ratePct} of price
-        after the broker split). Potential assumes every matched lead converts, so it is an
+        <strong>total agency commission</strong> (real registered average per suburb, about ${ratePct} of price).
+        Potential assumes every matched lead converts, so it is an
         upper bound; see the <a href="#/costings">Costings</a> tab for the full model.
       </p>
       ${matchedMeta ? `

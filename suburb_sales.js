@@ -1,4 +1,4 @@
-// Suburb sales reference data — average sale prices per suburb + title type.
+// Suburb sales reference data - average sale prices per suburb + title type.
 // ============================================================================
 // Now DATA-DRIVEN from the commission register (public.sales_deals). ROWS are
 // rebuilt from actual PAID_OUT, non-rental sales via buildFromRegister(), which
@@ -10,9 +10,9 @@
 // these by titleCode(); register rows already carry title_code from the sync.
 //
 // Row fields: team (the division with the most sales there), suburb, type,
-// avg_price, total_spend, num_sales, median_price, avg_q1_comm (REAL average
-// Quay 1 commission banked per sale). m2 / days-on-market aren't in the register
-// so those stay null (shown as n/a).
+// avg_price, total_spend, num_sales, median_price, avg_comm (REAL average total
+// agency commission per sale). m2 / days-on-market aren't in the register so
+// those stay null (shown as n/a).
 window.SUBURB_SALES = (() => {
   const YEAR = 2025;
   const PLACEHOLDER = false;
@@ -26,8 +26,8 @@ window.SUBURB_SALES = (() => {
   // Fallback until the register loads (keeps find() working; overwritten by
   // buildFromRegister on first load).
   let ROWS = [
-    { team: "Assassins", suburb: "Vredehoek", type: "ST", avg_price: 2887289, num_sales: 45, median_price: 2900000, avg_q1_comm: 60559 },
-    { team: "Assassins", suburb: "Vredehoek", type: "FT", avg_price: 6750000, num_sales: 12, median_price: 6750000, avg_q1_comm: 160277 },
+    { team: "Assassins", suburb: "Vredehoek", type: "ST", avg_price: 2887289, num_sales: 45, median_price: 2900000, avg_comm: 121266 },
+    { team: "Assassins", suburb: "Vredehoek", type: "FT", avg_price: 6750000, num_sales: 12, median_price: 6750000, avg_comm: 283500 },
   ];
 
   const _num = v => (v == null || v === "") ? null : (isNaN(+v) ? null : +v);
@@ -61,7 +61,7 @@ window.SUBURB_SALES = (() => {
       let g = groups.get(key);
       if (!g) { g = { suburb: sub, type: code, prices: [], comms: [], teams: [] }; groups.set(key, g); }
       g.prices.push(price);
-      const q = _num(r.quay1_gross_comm); if (q != null) g.comms.push(q);
+      const c = _num(r.total_gross_comm); if (c != null) g.comms.push(c);
       if (r.division_name) g.teams.push(r.division_name);
     }
     const built = [];
@@ -76,7 +76,7 @@ window.SUBURB_SALES = (() => {
         total_spend: Math.round(sum),
         num_sales: g.prices.length,
         median_price: Math.round(_median(g.prices)),
-        avg_q1_comm: g.comms.length ? Math.round(g.comms.reduce((a, b) => a + b, 0) / g.comms.length) : null,
+        avg_comm: g.comms.length ? Math.round(g.comms.reduce((a, b) => a + b, 0) / g.comms.length) : null,
         // Not available in the register:
         avg_rate_per_m2: null,
         avg_days_on_market: null,

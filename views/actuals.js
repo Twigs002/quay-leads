@@ -1,6 +1,6 @@
-// Actuals / Revenue view — the real money. Reads the commission register
+// Actuals / Revenue view - the real money. Reads the commission register
 // (ctx.cache.salesDeals, from the super/admin-gated sales_deals view) and shows
-// what Quay 1 actually banked: commission by month and team, sales vs rentals,
+// the total agency commission earned: commission by month and team, sales vs rentals,
 // top suburbs, and cost-vs-return against Meta + Dialfire spend. Super/admin only.
 window.VIEWS = window.VIEWS || {};
 window.VIEWS.actuals = function (root, ctx) {
@@ -37,12 +37,12 @@ window.VIEWS.actuals = function (root, ctx) {
   const rentPaid = paid.filter(d => d.is_rental);
   const openDeals = all.filter(d => d.deal_status === "OPEN");
 
-  const salesComm = salesPaid.reduce((a, d) => a + num(d.quay1_gross_comm), 0);
-  const rentComm = rentPaid.reduce((a, d) => a + num(d.quay1_gross_comm), 0);
+  const salesComm = salesPaid.reduce((a, d) => a + num(d.total_gross_comm), 0);
+  const rentComm = rentPaid.reduce((a, d) => a + num(d.total_gross_comm), 0);
   const soldValue = salesPaid.reduce((a, d) => a + num(d.purchase_price), 0);
   const avgCommPerSale = salesPaid.length ? salesComm / salesPaid.length : 0;
   const openValue = openDeals.reduce((a, d) => a + num(d.purchase_price), 0);
-  const openComm = openDeals.reduce((a, d) => a + num(d.quay1_gross_comm), 0);
+  const openComm = openDeals.reduce((a, d) => a + num(d.total_gross_comm), 0);
 
   // ── Trailing-12-month cost vs return ──────────────────────────────────────
   // Actual commission banked in the last 12 months vs annualised acquisition +
@@ -53,9 +53,9 @@ window.VIEWS.actuals = function (root, ctx) {
   const cutoff = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate());
   const commT12 = salesPaid
     .filter(d => d.deal_date_d && d.deal_date_d >= cutoff)
-    .reduce((a, d) => a + num(d.quay1_gross_comm), 0)
+    .reduce((a, d) => a + num(d.total_gross_comm), 0)
     + rentPaid.filter(d => d.deal_date_d && d.deal_date_d >= cutoff)
-      .reduce((a, d) => a + num(d.quay1_gross_comm), 0);
+      .reduce((a, d) => a + num(d.total_gross_comm), 0);
   const leads = (ctx.cache && ctx.cache.leads) || [];
   const metaLeadsT12 = leads.filter(l => STAGES.isMetaSource(l.source) && l.datestamp_d && l.datestamp_d >= cutoff).length;
   const metaSpendT12 = metaLeadsT12 * STAGES.META_COST_PER_LEAD;
@@ -73,7 +73,7 @@ window.VIEWS.actuals = function (root, ctx) {
   const method = { phone: 0, name: 0, address: 0 };
   for (const d of attributed) {
     const o = d.lead_origin === "dialfire" ? "dialfire" : "slb";
-    attr[o].n++; attr[o].comm += num(d.quay1_gross_comm);
+    attr[o].n++; attr[o].comm += num(d.total_gross_comm);
     if (d.match_method && method[d.match_method] != null) method[d.match_method]++;
   }
   const attrComm = attr.dialfire.comm + attr.slb.comm;
@@ -83,8 +83,8 @@ window.VIEWS.actuals = function (root, ctx) {
   // is solid; SLB commission is shown against Meta spend as a softer comparison
   // (the seller lead bank has sources beyond Meta).
   const inT12 = d => d.deal_date_d && d.deal_date_d >= cutoff;
-  const dfCommT12 = attributed.filter(d => d.lead_origin === "dialfire" && inT12(d)).reduce((a, d) => a + num(d.quay1_gross_comm), 0);
-  const slbCommT12 = attributed.filter(d => d.lead_origin !== "dialfire" && inT12(d)).reduce((a, d) => a + num(d.quay1_gross_comm), 0);
+  const dfCommT12 = attributed.filter(d => d.lead_origin === "dialfire" && inT12(d)).reduce((a, d) => a + num(d.total_gross_comm), 0);
+  const slbCommT12 = attributed.filter(d => d.lead_origin !== "dialfire" && inT12(d)).reduce((a, d) => a + num(d.total_gross_comm), 0);
   const dfRoi = dialfireT12 ? dfCommT12 / dialfireT12 : null;
   const metaRoi = metaSpendT12 ? slbCommT12 / metaSpendT12 : null;
 
@@ -102,7 +102,7 @@ window.VIEWS.actuals = function (root, ctx) {
     const t = d.division_name || "(none)";
     let g = teamMap.get(t);
     if (!g) { g = { team: t, n: 0, comm: 0, sold: 0 }; teamMap.set(t, g); }
-    g.n++; g.comm += num(d.quay1_gross_comm); g.sold += num(d.purchase_price);
+    g.n++; g.comm += num(d.total_gross_comm); g.sold += num(d.purchase_price);
   }
   const teamRows = [...teamMap.values()].sort((a, b) => b.comm - a.comm);
   const teamBody = teamRows.map(g => `<tr>
@@ -121,7 +121,7 @@ window.VIEWS.actuals = function (root, ctx) {
     const key = s + "|" + (d.title_code || "?");
     let g = subMap.get(key);
     if (!g) { g = { suburb: s, type: d.title_code || "?", n: 0, comm: 0 }; subMap.set(key, g); }
-    g.n++; g.comm += num(d.quay1_gross_comm);
+    g.n++; g.comm += num(d.total_gross_comm);
   }
   const subRows = [...subMap.values()].sort((a, b) => b.comm - a.comm).slice(0, 12);
   const subBody = subRows.map(g => `<tr>
@@ -139,12 +139,12 @@ window.VIEWS.actuals = function (root, ctx) {
     <p class="lede">Real commission banked, straight from the deal &amp; commission register (${grp(paid.length)} paid-out deals).</p>
 
     <section class="card" style="margin-top:16px;">
-      <h3>Commission banked</h3>
-      <p class="section-caption">Quay 1's share of commission on paid-out deals (excludes fallen-through and duplicates).</p>
+      <h3>Agency commission</h3>
+      <p class="section-caption">Total agency commission on paid-out deals (excludes fallen-through and duplicates). Quay retains about half of this to cover overheads and the broker split.</p>
       <div class="kpis" style="margin-top:4px;">
         ${card("Sales commission", randS(salesComm), `${grp(salesPaid.length)} sales paid out`, green)}
         ${card("Rentals commission", randS(rentComm), `${grp(rentPaid.length)} rentals paid out`, green)}
-        ${card("Avg commission / sale", randS(avgCommPerSale), "Quay 1 share per sale", blue)}
+        ${card("Avg commission / sale", randS(avgCommPerSale), "total agency commission per sale", blue)}
         ${card("Property sold", randS(soldValue), "total purchase price transacted", blue)}
         ${card("Open pipeline", randS(openComm), `${grp(openDeals.length)} open · ${randS(openValue)} value`, yellow)}
       </div>
@@ -188,7 +188,7 @@ window.VIEWS.actuals = function (root, ctx) {
     <div class="grid-2" style="margin-top:16px;">
       <section class="card">
         <h3>Commission banked by month</h3>
-        <p class="section-caption">Quay 1 commission on paid-out deals, by deal month.</p>
+        <p class="section-caption">Total agency commission on paid-out deals, by deal month.</p>
         <div id="actuals-month-chart" style="height:360px;"></div>
       </section>
       <section class="card">
@@ -225,7 +225,7 @@ window.VIEWS.actuals = function (root, ctx) {
   for (const d of salesPaid.concat(rentPaid)) {
     if (!d.deal_date_d) continue;
     const key = d.deal_date_d.getFullYear() + "-" + String(d.deal_date_d.getMonth() + 1).padStart(2, "0");
-    byMonth[key] = (byMonth[key] || 0) + num(d.quay1_gross_comm);
+    byMonth[key] = (byMonth[key] || 0) + num(d.total_gross_comm);
   }
   const months = Object.keys(byMonth).sort().slice(-24);
   if (months.length) {

@@ -294,18 +294,19 @@ def _has_num(t: str) -> bool:
     return bool(re.match(r"^\d+[a-z]?$", t))
 
 
-def _norm_name(s: str) -> frozenset:
-    s = re.sub(r"[^a-z ]", " ", (s or "").lower())
+def _norm_name(s) -> frozenset:
+    # gspread returns numeric cells as int/float — always coerce to str first.
+    s = re.sub(r"[^a-z ]", " ", ("" if s is None else str(s)).lower())
     return frozenset(t for t in s.split() if len(t) > 1)
 
 
-def _norm_phone(s: str):
-    d = re.sub(r"\D", "", s or "")
+def _norm_phone(s):
+    d = re.sub(r"\D", "", "" if s is None else str(s))
     return d[-9:] if len(d) >= 9 else None   # last 9 digits (ignore country/leading 0)
 
 
-def _norm_addr(s: str) -> str:
-    s = re.sub(r"[^a-z0-9 ]", " ", (s or "").lower())
+def _norm_addr(s) -> str:
+    s = re.sub(r"[^a-z0-9 ]", " ", ("" if s is None else str(s)).lower())
     s = _ADDR_TYPE_RE.sub(" ", s)
     return re.sub(r"\s+", " ", s).strip()
 

@@ -123,12 +123,37 @@ window.DATA = (() => {
     } catch (e) {
       if (!_missingTable(e)) throw e;
     }
+    // Sales / commission register (actuals). Super/admin only via the gated
+    // sales_deals view (team members get 0 rows). Tolerate the view not existing
+    // yet (before the 2026-08-07 migration) so the dashboard keeps working.
+    let salesDeals = [];
+    try {
+      salesDeals = await _allRows("sales_deals");
+    } catch (e) {
+      if (!_missingTable(e)) throw e;
+    }
+    for (const s of salesDeals) {
+      s.purchase_price = s.purchase_price == null ? null : Number(s.purchase_price);
+      s.quay1_gross_comm = s.quay1_gross_comm == null ? null : Number(s.quay1_gross_comm);
+      s.commission_incl_vat = s.commission_incl_vat == null ? null : Number(s.commission_incl_vat);
+      s.is_rental = !!s.is_rental;
+      // Date used for monthly rollups: transfer date if present, else acceptance.
+      const dstr = s.transfer_date || s.acceptance_date || null;
+      const d = dstr ? new Date(dstr) : null;
+      s.deal_date_d = d && !isNaN(d) ? d : null;
+    }
+    // Rebuild the suburb reference table from the register (all suburbs), so
+    // Costings/CFO use real averages instead of the hand-mapped fallback.
+    if (window.SUBURB_SALES && SUBURB_SALES.buildFromRegister) {
+      SUBURB_SALES.buildFromRegister(salesDeals);
+    }
     const syncMain = status.find(s => s.name === "leads_sync");
     const syncTeam = status.find(s => s.name === "team_activity_sync");
     _cache = {
       leads: enriched,
       teamActivity: teamActivity || [],
       stageValue: stageValue || [],
+      salesDeals: salesDeals || [],
       lastSync: syncMain ? syncMain.last_synced_at : null,
       syncOk: syncMain ? !!syncMain.ok : null,
       syncMessage: syncMain ? syncMain.message : null,

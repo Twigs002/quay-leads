@@ -274,11 +274,112 @@ def _parse_date_only(v):
     return None
 
 
+# ── Sale → lead attribution (Dialfire vs Seller Lead Bank) ───────────────
+# Matches a register sale back to the lead that generated it, using seller
+# phone / name / address. Runs here (in memory) so we can use client PII to
+# match WITHOUT ever storing it — only the outcome (origin/method/deal_id) is
+# written to sales_register.
+_ADDR_TYPE_RE = re.compile(
+    r"\b(street|str|road|rd|avenue|ave|crescent|cres|drive|dr|lane|close|way|place|pl)\b")
+# Street names too common to trust without a suburb (a "8 Main Road" match could
+# be any of a dozen suburbs). Only relax the suburb requirement for distinctive
+# street names.
+_GENERIC_STREET = {
+    "main", "church", "high", "long", "short", "park", "victoria", "queen",
+    "king", "first", "second", "third", "oxford", "station", "beach",
+}
+
+
+def _has_num(t: str) -> bool:
+    return bool(re.match(r"^\d+[a-z]?$", t))
+
+
+def _norm_name(s: str) -> frozenset:
+    s = re.sub(r"[^a-z ]", " ", (s or "").lower())
+    return frozenset(t for t in s.split() if len(t) > 1)
+
+
+def _norm_phone(s: str):
+    d = re.sub(r"\D", "", s or "")
+    return d[-9:] if len(d) >= 9 else None   # last 9 digits (ignore country/leading 0)
+
+
+def _norm_addr(s: str) -> str:
+    s = re.sub(r"[^a-z0-9 ]", " ", (s or "").lower())
+    s = _ADDR_TYPE_RE.sub(" ", s)
+    return re.sub(r"\s+", " ", s).strip()
+
+
+def build_lead_index(leads: list[dict], auto_ids: set[str]) -> dict:
+    """Index the leads book for attribution. Each lead's origin is 'dialfire'
+    when its deal was auto-created by the Dialfire→n8n pipe, else 'slb'."""
+    by_name: dict = {}
+    by_phone: dict = {}
+    lst: list[dict] = []
+    for l in leads:
+        did = str(l.get("deal_id") or "")
+        origin = "dialfire" if (did and did in auto_ids) else "slb"
+        rec = {
+            "origin": origin,
+            "deal_id": did or None,
+            "name": _norm_name(l.get("client_name")),
+            "phone": _norm_phone(l.get("phone")),
+            "toks": set(_norm_addr(l.get("property_address")).split()),
+            "suburb": (l.get("suburb") or "").lower().strip(),
+        }
+        lst.append(rec)
+        if rec["name"]:
+            by_name.setdefault(rec["name"], rec)
+        if rec["phone"]:
+            by_phone.setdefault(rec["phone"], rec)
+    return {"by_name": by_name, "by_phone": by_phone, "list": lst}
+
+
+def _attribute_row(raw: dict, idx: dict):
+    """Match one raw register row (with PII, in memory) to a lead. Returns
+    (origin, method, matched_deal_id) or (None, None, None). Precedence:
+    phone (strongest) → name → address (fuzzy)."""
+    # Phone
+    for ph in (raw.get("sellerCellphone"), raw.get("seller2Cellphone")):
+        k = _norm_phone(ph)
+        if k and k in idx["by_phone"]:
+            m = idx["by_phone"][k]
+            return m["origin"], "phone", m["deal_id"]
+    # Name
+    for nm in (raw.get("sellerFullname"), raw.get("seller2Fullname")):
+        k = _norm_name(nm)
+        if k and k in idx["by_name"]:
+            m = idx["by_name"][k]
+            return m["origin"], "name", m["deal_id"]
+    # Address matching needs a house NUMBER + a street NAME to be specific.
+    rtoks = set(_norm_addr(f"{raw.get('streetNumber', '')} {raw.get('streetName', '')}").split())
+    rnum = {t for t in rtoks if _has_num(t)}
+    rstreet = {t for t in rtoks if not _has_num(t) and len(t) > 2}
+    if rnum and rstreet:
+        rsub = (raw.get("suburb") or "").lower().strip()
+        # Tier A (high precision): number + street + same suburb.
+        for m in idx["list"]:
+            if m["suburb"] == rsub and rnum.issubset(m["toks"]) and rstreet.issubset(m["toks"]):
+                return m["origin"], "address", m["deal_id"]
+        # Tier B (relaxed): number + distinctive street, suburb tolerated to
+        # differ (labels vary), but ONLY when the match is unambiguous — every
+        # matching lead points to the same origin. Skips generic street names.
+        if not (rstreet & _GENERIC_STREET):
+            cand = [m for m in idx["list"]
+                    if rnum.issubset(m["toks"]) and rstreet.issubset(m["toks"])]
+            origins = {m["origin"] for m in cand}
+            if cand and len(origins) == 1:
+                return cand[0]["origin"], "address", cand[0]["deal_id"]
+    return None, None, None
+
+
 # ── Sheet → sales register (actuals) ─────────────────────────────────────
-def fetch_sales_register(sheet_id: str) -> list[dict]:
+def fetch_sales_register(sheet_id: str, lead_index: dict | None = None) -> list[dict]:
     """Read the commission register sheet → sales_register rows. Economic +
     address + team + lead-broker fields only; all client PII is dropped by
-    virtue of not being in REGISTER_COL_MAP."""
+    virtue of not being in REGISTER_COL_MAP. When lead_index is given, each row
+    is also attributed to its originating lead (Dialfire vs Seller Lead Bank)
+    using seller PII locally — that PII is used for matching only, never stored."""
     gc = gspread_client()
     ws = gc.open_by_key(sheet_id).get_worksheet(0)  # first tab (gid=0)
     rows = ws.get_all_records()
@@ -303,6 +404,13 @@ def fetch_sales_register(sheet_id: str) -> list[dict]:
         # Derived fields.
         rec["title_code"] = REGISTER_TITLE_CODE.get(rec.get("property_type") or "", None)
         rec["is_rental"] = bool((rec.get("division_name") or "").startswith("Rentals"))
+        # Lead attribution (result only; seller PII from `r` is used then discarded).
+        if lead_index is not None:
+            origin, method, mdid = _attribute_row(r, lead_index)
+            rec["lead_origin"] = origin
+            rec["lead_matched"] = origin is not None
+            rec["match_method"] = method
+            rec["matched_deal_id"] = mdid
         rec["synced_at"] = datetime.now(timezone.utc).isoformat()
         out.append(rec)
     return out
@@ -653,10 +761,19 @@ def main():
         try:
             reg_id = os.environ.get("REGISTER_SHEET_ID", "").strip() or REGISTER_SHEET_ID_DEFAULT
             print("→ reading sales register")
-            reg_rows = fetch_sales_register(reg_id)
+            # Build the lead index for attribution: which deals were auto-created
+            # by the Dialfire→n8n pipe (origin=dialfire) vs the rest (slb).
+            auto_ids = {
+                str(d.get("deal_id")) for d in deal_rows
+                if "n8n" in (d.get("hs_object_source_detail") or "").lower()
+                or d.get("hs_object_source") == "INTEGRATION"
+            }
+            lead_index = build_lead_index(leads, auto_ids)
+            reg_rows = fetch_sales_register(reg_id, lead_index=lead_index)
             n_reg = upsert_chunked(sb, "sales_register", reg_rows, on_conflict="id") if reg_rows else 0
-            print(f"  upserted {n_reg:,} sales_register rows")
-            heartbeat(sb, "sales_register_sync", ok=True, message=f"{n_reg} register rows")
+            n_attr = sum(1 for r in reg_rows if r.get("lead_matched"))
+            print(f"  upserted {n_reg:,} sales_register rows ({n_attr:,} attributed to a lead)")
+            heartbeat(sb, "sales_register_sync", ok=True, message=f"{n_reg} register rows, {n_attr} attributed")
         except Exception as exc:  # noqa: BLE001
             print(f"  ! sales_register step skipped: {exc}")
             try:

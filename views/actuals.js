@@ -64,6 +64,30 @@ window.VIEWS.actuals = function (root, ctx) {
   const roiMultiple = costT12 ? commT12 / costT12 : null;
   const netT12 = commT12 - costT12;
 
+  // ── Attribution: which paid deals trace back to a lead we generated ───────
+  // lead_origin / lead_matched / match_method come from the sync's in-memory
+  // match (seller phone/name/address vs the leads book). Only ~1 in 6 sales is
+  // traceable; the rest are sellers who were never in our lead book.
+  const attributed = paid.filter(d => d.lead_matched);
+  const attr = { dialfire: { n: 0, comm: 0 }, slb: { n: 0, comm: 0 } };
+  const method = { phone: 0, name: 0, address: 0 };
+  for (const d of attributed) {
+    const o = d.lead_origin === "dialfire" ? "dialfire" : "slb";
+    attr[o].n++; attr[o].comm += num(d.quay1_gross_comm);
+    if (d.match_method && method[d.match_method] != null) method[d.match_method]++;
+  }
+  const attrComm = attr.dialfire.comm + attr.slb.comm;
+  const bookComm = salesComm + rentComm;
+  const attrPct = bookComm ? (100 * attrComm / bookComm) : 0;
+  // Per-channel return over 12 months: Dialfire cost is well-defined, so its ROI
+  // is solid; SLB commission is shown against Meta spend as a softer comparison
+  // (the seller lead bank has sources beyond Meta).
+  const inT12 = d => d.deal_date_d && d.deal_date_d >= cutoff;
+  const dfCommT12 = attributed.filter(d => d.lead_origin === "dialfire" && inT12(d)).reduce((a, d) => a + num(d.quay1_gross_comm), 0);
+  const slbCommT12 = attributed.filter(d => d.lead_origin !== "dialfire" && inT12(d)).reduce((a, d) => a + num(d.quay1_gross_comm), 0);
+  const dfRoi = dialfireT12 ? dfCommT12 / dialfireT12 : null;
+  const metaRoi = metaSpendT12 ? slbCommT12 / metaSpendT12 : null;
+
   function card(label, value, sub, accent) {
     return `<div class="kpi"${accent ? ` style="border-left:4px solid ${accent};"` : ""}>
       <div class="label">${label}</div>
@@ -138,6 +162,27 @@ window.VIEWS.actuals = function (root, ctx) {
         ${card("Lead cost (12m)", randS(costT12), `Dialfire ${randS(dialfireT12)} + Meta ${randS(metaSpendT12)}`, yellow)}
         ${card("Return on spend", roiMultiple == null ? "--" : roiMultiple.toFixed(1) + "×", `net ${randS(netT12)}`, roiTone)}
       </div>
+    </section>
+
+    <section class="card" style="margin-top:16px;">
+      <h3>Attributed to our leads</h3>
+      <p class="section-caption">
+        Paid deals matched back to a lead we generated (by seller phone / name / address, done privately at
+        sync time). Only <strong>${grp(attributed.length)}</strong> of ${grp(paid.length)} paid deals
+        (<strong>${attrPct.toFixed(0)}%</strong> of banked commission) are traceable; the rest are sellers who
+        were never in our lead book. Matches: ${grp(method.phone)} phone, ${grp(method.name)} name, ${grp(method.address)} address.
+      </p>
+      <div class="kpis" style="margin-top:4px;">
+        ${card("Dialfire → sales", randS(attr.dialfire.comm), `${grp(attr.dialfire.n)} sales traced to the calling pipe`, blue)}
+        ${card("Seller Lead Bank → sales", randS(attr.slb.comm), `${grp(attr.slb.n)} sales traced to sheet leads`, blue)}
+        ${card("Dialfire return (12m)", dfRoi == null ? "--" : dfRoi.toFixed(1) + "×", `${randS(dfCommT12)} vs ${randS(dialfireT12)} cost`, dfRoi != null && dfRoi >= 1 ? green : yellow)}
+        ${card("Meta return (12m, soft)", metaRoi == null ? "--" : metaRoi.toFixed(1) + "×", `SLB ${randS(slbCommT12)} vs Meta ${randS(metaSpendT12)}`, metaRoi != null && metaRoi >= 1 ? green : yellow)}
+      </div>
+      <p class="muted small" style="margin-top:10px;">
+        Attribution is a floor, not the full picture: it only counts sales where the seller is identifiable in our
+        lead data. Dialfire return uses the full calling cost; the Meta figure compares Seller-Lead-Bank sales to
+        Meta spend only, so treat it as directional.
+      </p>
     </section>
 
     <div class="grid-2" style="margin-top:16px;">

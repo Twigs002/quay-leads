@@ -10,6 +10,7 @@ Writes:
   - Supabase public.leads          (upsert by lowercased email)
   - Supabase public.hs_deal_state  (upsert by deal_id)
   - Supabase public.hs_deal_calls  (upsert by (deal_id, call_id))
+  - Supabase public.sales_register (upsert by id; commission actuals, no PII)
   - Supabase public.sync_status    (heartbeat + last error)
 
 Idempotent. Safe to run on a cron; nothing is destructively replaced
@@ -76,6 +77,46 @@ LEAD_COL_MAP = {
     "HubspotStatus":    "hubspot_status",
     "HubspotStatus2":   "hubspot_status2",
 }
+
+# ── Sales / commission register (actuals) ─────────────────────────────────
+# A SEPARATE Google Sheet: the company deal & commission register. Feeds real
+# banked-commission actuals into Costings/CFO + the Actuals view. We ingest ONLY
+# economic fields, the address, the team, and the lead broker's name — NEVER any
+# seller/purchaser PII (names, IDs, cellphones, emails are deliberately dropped).
+REGISTER_SHEET_ID_DEFAULT = "1huZJUJWPBJHV8zyievMdyJu2fwDcbU2c4XUdsjLV7k0"
+# Sheet header → sales_register column. Anything not listed here is ignored
+# (which is how all the PII columns get excluded).
+REGISTER_COL_MAP = {
+    "id":                "id",
+    "divisionName":      "division_name",
+    "dealStatus":        "deal_status",
+    "propertyType":      "property_type",
+    "refNumber":         "ref_number",
+    "transferDate":      "transfer_date",
+    "acceptanceDate":    "acceptance_date",
+    "poDate":            "po_date",
+    "brokerPayDate":     "broker_pay_date",
+    "streetNumber":      "street_number",
+    "streetName":        "street_name",
+    "suburb":            "suburb",
+    "township":          "township",
+    "purchasePrice":     "purchase_price",
+    "commission":        "commission_pct",
+    "commissionExclVat": "commission_excl_vat",
+    "commissionInclVat": "commission_incl_vat",
+    "totalGrossComm":    "total_gross_comm",
+    "quay1Comm":         "quay1_comm",
+    "quay1GrossComm":    "quay1_gross_comm",
+    "quay1CommNet":      "quay1_comm_net",
+    "broker1FullName":   "broker1_name",
+    "broker1CommGross":  "broker1_comm_gross",
+}
+REGISTER_DATE_COLS = {"transfer_date", "acceptance_date", "po_date", "broker_pay_date"}
+REGISTER_NUM_COLS = {
+    "purchase_price", "commission_pct", "commission_excl_vat", "commission_incl_vat",
+    "total_gross_comm", "quay1_comm", "quay1_gross_comm", "quay1_comm_net", "broker1_comm_gross",
+}
+REGISTER_TITLE_CODE = {"Full Title": "FT", "Sectional Title": "ST"}
 
 
 # ── Auth helpers ─────────────────────────────────────────────────────────
@@ -216,6 +257,55 @@ def _parse_dt_dayfirst(v):
     if dt is None:
         return None
     return _defuture(dt, now).astimezone(timezone.utc).isoformat()
+
+
+def _parse_date_only(v):
+    """Register dates land as 'YYYY-MM-DD HH:MM:SS' (or blank). Return the date
+    part as an ISO 'YYYY-MM-DD' string, or None. Out-of-range typos (e.g. a 2052
+    year) are kept as-is; the dashboard filters to a sane window."""
+    if v in (None, ""):
+        return None
+    s = str(v).strip()
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d", "%d/%m/%Y %H:%M:%S", "%d/%m/%Y"):
+        try:
+            return datetime.strptime(s, fmt).date().isoformat()
+        except ValueError:
+            continue
+    return None
+
+
+# ── Sheet → sales register (actuals) ─────────────────────────────────────
+def fetch_sales_register(sheet_id: str) -> list[dict]:
+    """Read the commission register sheet → sales_register rows. Economic +
+    address + team + lead-broker fields only; all client PII is dropped by
+    virtue of not being in REGISTER_COL_MAP."""
+    gc = gspread_client()
+    ws = gc.open_by_key(sheet_id).get_worksheet(0)  # first tab (gid=0)
+    rows = ws.get_all_records()
+    out: list[dict] = []
+    seen: set[str] = set()
+    for r in rows:
+        rid = str(r.get("id") or "").strip()
+        if not rid or rid in seen:
+            continue  # rows without an id, or dupes, are skipped (id is the PK)
+        seen.add(rid)
+        rec: dict = {}
+        for src, dst in REGISTER_COL_MAP.items():
+            v = r.get(src)
+            if v in (None, "", "NaN"):
+                rec[dst] = None
+            elif dst in REGISTER_DATE_COLS:
+                rec[dst] = _parse_date_only(v)
+            elif dst in REGISTER_NUM_COLS:
+                rec[dst] = _to_float(v)
+            else:
+                rec[dst] = str(v).strip()
+        # Derived fields.
+        rec["title_code"] = REGISTER_TITLE_CODE.get(rec.get("property_type") or "", None)
+        rec["is_rental"] = bool((rec.get("division_name") or "").startswith("Rentals"))
+        rec["synced_at"] = datetime.now(timezone.utc).isoformat()
+        out.append(rec)
+    return out
 
 
 # ── HubSpot → deal state ────────────────────────────────────────────────
@@ -556,6 +646,23 @@ def main():
         print(f"→ upserting hs_deal_calls")
         n_calls = upsert_chunked(sb, "hs_deal_calls", call_rows, on_conflict="deal_id,call_id") if call_rows else 0
         print(f"  upserted {n_calls:,}")
+
+        # Sales / commission register (actuals). Best-effort + self-contained:
+        # a separate sheet with its own heartbeat, so a failure here never breaks
+        # the core leads sync above. Skips cleanly if the sheet isn't shared yet.
+        try:
+            reg_id = os.environ.get("REGISTER_SHEET_ID", "").strip() or REGISTER_SHEET_ID_DEFAULT
+            print("→ reading sales register")
+            reg_rows = fetch_sales_register(reg_id)
+            n_reg = upsert_chunked(sb, "sales_register", reg_rows, on_conflict="id") if reg_rows else 0
+            print(f"  upserted {n_reg:,} sales_register rows")
+            heartbeat(sb, "sales_register_sync", ok=True, message=f"{n_reg} register rows")
+        except Exception as exc:  # noqa: BLE001
+            print(f"  ! sales_register step skipped: {exc}")
+            try:
+                heartbeat(sb, "sales_register_sync", ok=False, message=str(exc)[:500])
+            except Exception:
+                pass
 
         heartbeat(sb, "leads_sync", ok=True, message=f"{n_leads} leads, {n_deals} deals, {n_calls} calls")
         print(f"✓ done at {datetime.now(timezone.utc).isoformat()}")

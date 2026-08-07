@@ -6,7 +6,7 @@
 window.STAGES = (() => {
   // Canonical pipeline order, exactly as it reads in HubSpot. Index in this
   // array is the sort key for every stage chart/table (item: "chronological
-  // order required — match this to HubSpot").
+  // order required - match this to HubSpot").
   const ORDER = [
     "Calling Lead",
     "External Lead",
@@ -57,7 +57,16 @@ window.STAGES = (() => {
   const META_SOURCE_RE = /\b(meta|facebook|fb)\b/i;
   const META_COST_PER_LEAD = 80;    // R per meta lead
   const QUALIFIED_TARGET_COST = 5000; // R reference line ("R5k")
-  const COMMISSION_RATE = 0.042;    // average commission we earn on a sale (4.2%)
+  // Total agency commission headline (what the client is quoted). Real register
+  // data shows ~5% gross; 4.2% is the conservative planning figure. This is NOT
+  // what Quay keeps - the broker split takes roughly half.
+  const COMMISSION_RATE = 0.042;    // total agency commission (headline)
+  // What Quay 1 actually RETAINS after the broker split - measured from the
+  // commission register (median 2.0%, weighted 1.94% of sale price). This is the
+  // figure every projection uses, so the model matches the money that hits the
+  // bank. Real per-suburb banked commission (suburb row avg_q1_comm) is used in
+  // preference to this rate wherever a suburb is mapped.
+  const QUAY_COMMISSION_RATE = 0.02;
 
   // Outbound calling (Dialfire) monthly running cost. Two assumptions the user
   // owns (adjust here and every view follows): the caller team's salaries, and
@@ -90,6 +99,7 @@ window.STAGES = (() => {
   return {
     ORDER, QUALIFIED, WON, LOST, NURTURE, OUT_OF_AREA, MANDATE, COMPETITOR_LOST,
     META_SOURCE_RE, META_COST_PER_LEAD, QUALIFIED_TARGET_COST, COMMISSION_RATE,
+    QUAY_COMMISSION_RATE,
     CALLER_SALARIES_MONTHLY, CALLING_COST_MONTHLY, DIALFIRE_MONTHLY_COST,
     DIALFIRE_LEADS_PER_MONTH_FALLBACK,
     orderIndex, isQualified, isMetaSource, isMandate, isWonListing, isLost,

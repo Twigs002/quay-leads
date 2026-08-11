@@ -41,6 +41,16 @@ window.UTILS = (() => {
 
   function pct(n, d) { return d ? `${(n / d * 100).toFixed(1)}%` : "—"; }
 
+  // Canonical HubSpot deep links (Quay 1 portal). One source of truth so every
+  // view builds the same URL — deal record page and owner (user) settings page.
+  const HUBSPOT_PORTAL_ID = "8870419"; // Quay 1
+  function hsDealLink(dealId) {
+    return `https://app.hubspot.com/contacts/${HUBSPOT_PORTAL_ID}/record/0-3/${encodeURIComponent(dealId)}`;
+  }
+  function hsOwnerLink(ownerId) {
+    return `https://app.hubspot.com/settings/${HUBSPOT_PORTAL_ID}/users?userId=${encodeURIComponent(ownerId)}`;
+  }
+
   // Empty-state HTML when filters return zero rows
   function emptyState(message = "No leads match the current filters.") {
     return `<div class="empty-state">
@@ -50,5 +60,6 @@ window.UTILS = (() => {
     </div>`;
   }
 
-  return { escapeHtml, escapeAttr, trunc, fmtDate, fmtShortDate, humanAgo, pct, emptyState };
+  return { escapeHtml, escapeAttr, trunc, fmtDate, fmtShortDate, humanAgo, pct, emptyState,
+    HUBSPOT_PORTAL_ID, hsDealLink, hsOwnerLink };
 })();

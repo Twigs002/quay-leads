@@ -103,8 +103,9 @@ window.VIEWS.pipeline = function (root, ctx) {
 
     <section class="card">
       <h3>Where the deals are on HubSpot</h3>
-      <p class="section-caption">Live deal stage from HubSpot, in pipeline order. Each bar shows the deal count and the stage's average <strong>win probability %</strong>. Refreshed every 30 min by the sync job.</p>
+      <p class="section-caption">Live deal stage from HubSpot, in pipeline order. Each bar shows the deal count and the stage's average <strong>win probability %</strong>. Refreshed every 30 min by the sync job. <strong>Click a bar</strong> to list that stage's deals with a link straight to each one in HubSpot.</p>
       <div id="stage-chart" style="height: 420px;"></div>
+      <div id="stage-deals"></div>
     </section>
 
     <section class="card">
@@ -234,6 +235,66 @@ window.VIEWS.pipeline = function (root, ctx) {
     hovertemplate: "%{y}<br>%{x} deals<extra></extra>",
   }], { ...THEME.PLOTLY_LAYOUT, margin: { l: 220, r: 24, t: 24, b: 40 },
         xaxis: { ...THEME.PLOTLY_LAYOUT.xaxis, title: "Deals" } }, THEME.PLOTLY_CONFIG);
+
+  // Click a stage bar → list that stage's deals, each linking to the actual
+  // HubSpot deal (portal deep-link) with its address / owner / calls. The bar
+  // is an aggregate, so this drills from stage → the underlying deals.
+  const $stageEl = document.getElementById("stage-chart");
+  const $stageDeals = document.getElementById("stage-deals");
+  let openStage = null;
+  function renderStageDeals(stage) {
+    // Toggle: clicking the open stage again closes the panel.
+    if (openStage === stage) { openStage = null; $stageDeals.innerHTML = ""; return; }
+    openStage = stage;
+    const deals = withDeal
+      .filter(l => l.current_stage === stage)
+      .sort((a, b) => (Number(b.amount) || 0) - (Number(a.amount) || 0)
+                   || (b.datestamp || "").localeCompare(a.datestamp || ""));
+    const rows = deals.map(l => {
+      const addr = l.property_address
+        ? escapeHtml(l.property_address) + (l.suburb ? `, ${escapeHtml(l.suburb)}` : "")
+        : (l.client_name ? escapeHtml(l.client_name) : (l.deal_name ? escapeHtml(l.deal_name) : "(no address)"));
+      const amt = l.amount ? "R" + Number(l.amount).toLocaleString(undefined, { maximumFractionDigits: 0 }) : "—";
+      const calls = l.num_calls > 0 ? `${l.num_calls} call${l.num_calls === 1 ? "" : "s"}` : "—";
+      const link = l.deal_id
+        ? `<a href="${UTILS.hsDealLink(l.deal_id)}" target="_blank" rel="noopener">Open ↗</a>`
+        : `<span class="muted">no deal id</span>`;
+      return `<tr>
+        <td>${addr}${l.deal_name && l.property_address ? `<div class="muted small">${escapeHtml(l.deal_name)}</div>` : ""}</td>
+        <td>${l.source ? `<span class="pill">${escapeHtml(l.source)}</span>` : `<span class="muted">—</span>`}</td>
+        <td>${escapeHtml(l.division || "—")}</td>
+        <td class="num">${escapeHtml(calls)}</td>
+        <td class="num">${amt}</td>
+        <td class="num">${link}</td>
+      </tr>`;
+    }).join("");
+    $stageDeals.innerHTML = `
+      <div class="card" style="margin-top:12px; padding:14px 16px; border-left:4px solid ${stageCmap[stage] || "#888"};">
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+          <div style="font-weight:700; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+            <span style="display:inline-block;width:11px;height:11px;border-radius:2px;background:${stageCmap[stage] || "#888"};"></span>
+            <span>${escapeHtml(stage)}</span>
+            <span class="muted small">${deals.length.toLocaleString()} deal${deals.length === 1 ? "" : "s"} · click the bar again to close</span>
+          </div>
+        </div>
+        <div class="table-wrap" style="margin-top:10px;">
+          <table class="dt">
+            <thead><tr>
+              <th>Address</th><th>Source</th><th>Division</th>
+              <th class="num">Calls</th><th class="num">Amount</th><th class="num">HubSpot</th>
+            </tr></thead>
+            <tbody>${rows || `<tr><td colspan="6" class="muted" style="padding:14px;">No deals in this stage in the current filters.</td></tr>`}</tbody>
+          </table>
+        </div>
+      </div>`;
+    $stageDeals.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
+  if ($stageEl && $stageEl.on) {
+    $stageEl.on("plotly_click", ev => {
+      const p = ev && ev.points && ev.points[0];
+      if (p && p.y) renderStageDeals(p.y);
+    });
+  }
 
   // Breakdown stacked
   Plotly.newPlot("breakdown-chart", breakdownTraces,

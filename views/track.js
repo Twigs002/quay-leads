@@ -34,14 +34,10 @@ function _ownerTeamMap(leads) {
   return out;
 }
 
-const HUBSPOT_PORTAL_ID = "8870419"; // Quay 1
-
-function _hsDealLink(dealId) {
-  return `https://app.hubspot.com/contacts/${HUBSPOT_PORTAL_ID}/record/0-3/${encodeURIComponent(dealId)}`;
-}
-function _hsOwnerLink(ownerId) {
-  return `https://app.hubspot.com/settings/${HUBSPOT_PORTAL_ID}/users?userId=${encodeURIComponent(ownerId)}`;
-}
+// HubSpot deep links live in UTILS (one canonical portal id). Thin local
+// wrappers keep the call sites below unchanged.
+const _hsDealLink = (dealId) => UTILS.hsDealLink(dealId);
+const _hsOwnerLink = (ownerId) => UTILS.hsOwnerLink(ownerId);
 
 // Format seconds as m:ss (or "—" if null/0-but-really-null). Zero-second
 // calls do occur — HubSpot logs voicemail leaves at 0s — so we DO render 0:00.

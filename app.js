@@ -154,9 +154,14 @@
     }, ms);
   }
 
+  // Old finance tabs merged into one "Finance" page — redirect legacy hashes
+  // so bookmarks and in-app links keep working.
+  const ROUTE_ALIAS = { cfo: "finance", costings: "finance", actuals: "finance" };
+
   function router(user, cache) {
     const hash = location.hash || "#/overview";
     const tab = hash.replace(/^#\//, "");
+    if (ROUTE_ALIAS[tab]) { location.hash = "#/" + ROUTE_ALIAS[tab]; return; }
     document.querySelectorAll(".tabs a").forEach(a => a.classList.toggle("active", a.dataset.tab === tab));
     const view = filteredView(cache);
     const ctx = { user, cache, view };

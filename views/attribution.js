@@ -45,16 +45,17 @@ window.VIEWS.attribution = function (root, ctx) {
   const paid = all.filter(d => d.deal_status === "PAID_OUT");
   const dfN = matched.filter(d => d.lead_origin === "dialfire").length;
   const slbN = matched.length - dfN;
-  const byMethod = { phone: 0, name: 0, address: 0 };
+  const byMethod = { email: 0, phone: 0, name: 0, address: 0 };
   for (const d of matched) if (d.match_method && byMethod[d.match_method] != null) byMethod[d.match_method]++;
   const matchedComm = matched.reduce((a, d) => a + num(d.total_gross_comm), 0);
 
-  // Origin + method pills (method doubles as a confidence signal: phone is the
-  // strongest, address the fuzziest).
+  // Origin + method pills (method doubles as a confidence signal: email/phone
+  // are the strongest, address the fuzziest).
   const originPill = o => o === "dialfire"
     ? `<span class="pill" style="background:#E8EEFB;color:${blue};">Dialfire</span>`
     : `<span class="pill" style="background:#FEF3C7;color:#92400E;">Seller Lead Bank</span>`;
   const methodPill = m => {
+    if (m === "email")   return `<span class="pill" style="background:#E8EEFB;color:#1D4ED8;">email</span>`;
     if (m === "phone")   return `<span class="pill" style="background:#E7F5EC;color:#0F6E3B;">phone</span>`;
     if (m === "name")    return `<span class="pill" style="background:#EEF2F8;color:var(--slate);">name</span>`;
     if (m === "address") return `<span class="pill" style="background:#FDECEC;color:#B91C1C;">address</span>`;
@@ -92,7 +93,7 @@ window.VIEWS.attribution = function (root, ctx) {
     <h2>Attribution</h2>
     <p class="lede">
       Every sale we could map back to a lead, and exactly what we mapped it by. Matching runs privately in the sync
-      on seller phone / name / address — only the result is stored, never the client's details. Whole register; not narrowed by the filters.
+      on seller email / phone / name / address — only the result is stored, never the client's details. Whole register; not narrowed by the filters.
     </p>
 
     <div class="kpis" style="margin-top:16px;">
@@ -106,8 +107,8 @@ window.VIEWS.attribution = function (root, ctx) {
       <h3>How each sale was matched</h3>
       <p class="section-caption">
         <strong>Matched by</strong> is the signal we mapped it on, strongest first:
-        ${methodPill("phone")} seller cellphone (exact) · ${methodPill("name")} full name (token match) ·
-        ${methodPill("address")} house number + street (fuzzy). Counts: ${grp(byMethod.phone)} phone, ${grp(byMethod.name)} name, ${grp(byMethod.address)} address.
+        ${methodPill("email")} seller email (exact) · ${methodPill("phone")} seller cellphone (exact) · ${methodPill("name")} full name (token match) ·
+        ${methodPill("address")} house number + street (fuzzy). Counts: ${grp(byMethod.email)} email, ${grp(byMethod.phone)} phone, ${grp(byMethod.name)} name, ${grp(byMethod.address)} address.
         The link opens the exact HubSpot deal the sale was matched to.
       </p>
       <div class="table-wrap" style="margin-top:12px;"><table class="dt">

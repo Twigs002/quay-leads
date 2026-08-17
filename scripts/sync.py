@@ -276,7 +276,7 @@ def _parse_date_only(v):
 
 # ── Sale → lead attribution (Dialfire vs Seller Lead Bank) ───────────────
 # Matches a register sale back to the lead that generated it, using seller
-# phone / name / address. Runs here (in memory) so we can use client PII to
+# email / phone / name / address. Runs here (in memory) so we can use client PII to
 # match WITHOUT ever storing it — only the outcome (origin/method/deal_id) is
 # written to sales_register.
 _ADDR_TYPE_RE = re.compile(
@@ -311,11 +311,17 @@ def _norm_addr(s) -> str:
     return re.sub(r"\s+", " ", s).strip()
 
 
+def _norm_email(s):
+    e = ("" if s is None else str(s)).strip().lower()
+    return e if "@" in e else None
+
+
 def build_lead_index(leads: list[dict], auto_ids: set[str]) -> dict:
     """Index the leads book for attribution. Each lead's origin is 'dialfire'
     when its deal was auto-created by the Dialfire→n8n pipe, else 'slb'."""
     by_name: dict = {}
     by_phone: dict = {}
+    by_email: dict = {}
     lst: list[dict] = []
     for l in leads:
         did = str(l.get("deal_id") or "")
@@ -325,6 +331,7 @@ def build_lead_index(leads: list[dict], auto_ids: set[str]) -> dict:
             "deal_id": did or None,
             "name": _norm_name(l.get("client_name")),
             "phone": _norm_phone(l.get("phone")),
+            "email": _norm_email(l.get("email")),
             "toks": set(_norm_addr(l.get("property_address")).split()),
             "suburb": (l.get("suburb") or "").lower().strip(),
         }
@@ -333,13 +340,21 @@ def build_lead_index(leads: list[dict], auto_ids: set[str]) -> dict:
             by_name.setdefault(rec["name"], rec)
         if rec["phone"]:
             by_phone.setdefault(rec["phone"], rec)
-    return {"by_name": by_name, "by_phone": by_phone, "list": lst}
+        if rec["email"]:
+            by_email.setdefault(rec["email"], rec)
+    return {"by_name": by_name, "by_phone": by_phone, "by_email": by_email, "list": lst}
 
 
 def _attribute_row(raw: dict, idx: dict):
     """Match one raw register row (with PII, in memory) to a lead. Returns
     (origin, method, matched_deal_id) or (None, None, None). Precedence:
-    phone (strongest) → name → address (fuzzy)."""
+    email (strongest, exact) → phone → name → address (fuzzy)."""
+    # Email — exact, unique, and the cheapest reliable signal when present.
+    for em in (raw.get("sellerEmail"), raw.get("seller2Email")):
+        k = _norm_email(em)
+        if k and k in idx["by_email"]:
+            m = idx["by_email"][k]
+            return m["origin"], "email", m["deal_id"]
     # Phone
     for ph in (raw.get("sellerCellphone"), raw.get("seller2Cellphone")):
         k = _norm_phone(ph)

@@ -201,9 +201,14 @@ body {
 .topnav-divider {
   width: 1px; height: var(--hdr-divider); background: rgba(255,255,255,0.28); flex: none;
 }
+.brand-titles { display: flex; flex-direction: column; line-height: 1.15; }
 .brand-name {
   color: #fff; text-transform: uppercase; letter-spacing: 0.04em;
   font-size: var(--hdr-title); font-weight: 800;
+}
+.brand-sub {
+  font-size: 13px; font-weight: 500; letter-spacing: .01em;
+  color: rgba(255,255,255,.78); margin-top: 2px; text-transform: none;
 }
 .tabs {
   display: flex; gap: 4px; flex: 1;

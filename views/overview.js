@@ -34,6 +34,27 @@ window.VIEWS.overview = function (root, ctx) {
   const rand0 = v => "R" + Math.round(v).toLocaleString();
   const overTarget = costPerQualified != null && costPerQualified > STAGES.QUALIFIED_TARGET_COST;
 
+  // Confirmed commission from these Meta leads: trace each meta lead's HubSpot
+  // deal to a PAID_OUT row in the sales register and sum the total agency
+  // commission it banked (same match + figure as Lead P&L). Only meta leads in
+  // the current date range are counted, so this moves with the filters above.
+  const sales = (ctx.cache && ctx.cache.salesDeals) || [];
+  const saleBy = new Map();
+  for (const s of sales) {
+    if (!s.matched_deal_id) continue;
+    const k = String(s.matched_deal_id);
+    const prev = saleBy.get(k);
+    if (!prev || (s.deal_status === "PAID_OUT" && prev.deal_status !== "PAID_OUT")) saleBy.set(k, s);
+  }
+  let metaConfirmedComm = 0, metaSoldCount = 0;
+  for (const l of metaLeads) {
+    const sale = l.deal_id ? saleBy.get(String(l.deal_id)) : null;
+    if (sale && sale.deal_status === "PAID_OUT") {
+      metaConfirmedComm += Number(sale.total_gross_comm) || 0;
+      metaSoldCount++;
+    }
+  }
+
   // ── Farming area (item: out-of-area = unqualified) ──────────────────────
   // A lead is out of area when its suburb isn't in the farmed set (or it's in
   // HubSpot's "Not My Area" stage). "Deals created" that count = has a deal
@@ -88,6 +109,11 @@ window.VIEWS.overview = function (root, ctx) {
           <div class="label">Cost per qualified lead</div>
           <div class="value">${costPerQualified == null ? "—" : rand0(costPerQualified)}</div>
           <div class="delta-row muted small">${costPerQualified == null ? "no qualified leads yet" : (overTarget ? "over target" : "on/under target")}</div>
+        </div>
+        <div class="kpi" style="border-left:4px solid ${THEME.tokens.green};">
+          <div class="label">Confirmed commission (Meta)</div>
+          <div class="value">${metaSoldCount ? rand0(metaConfirmedComm) : "—"}</div>
+          <div class="delta-row muted small">${metaSoldCount ? `${metaSoldCount} sold &amp; paid · total agency commission` : "no Meta leads banked yet"}</div>
         </div>
       </div>
       <p class="muted small" style="margin-top: 10px;">

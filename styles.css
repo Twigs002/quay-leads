@@ -701,8 +701,18 @@ table.dt td.num, table.dt th.num { text-align: right; font-variant-numeric: tabu
 }
 
 @media (max-width: 640px) {
+  /* Unified mobile masthead: compact lockup, subtitle/divider dropped,
+     tabs fall to their own full-width scrollable row. */
+  .topnav { flex-wrap: wrap; gap: 10px 14px; padding: 10px 14px; }
+  .brand { gap: 12px; flex: 1 1 auto; min-width: 0; }
+  .topnav-divider { display: none; }
+  .brand-name { font-size: 16px; }
+  .brand-sub { display: none; }
+  .user-chip { margin-left: auto; }
+  .user-chip .muted { display: none; }
   /* Tab bar: single swipeable row instead of ragged wrap */
   .tabs {
+    order: 3; flex: 1 0 100%;
     flex-wrap: nowrap;
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;

@@ -39,8 +39,8 @@ window.VIEWS["lead-pnl"] = function (root, ctx) {
   const dfCost = dfPerMonth ? Math.round(STAGES.DIALFIRE_MONTHLY_COST / dfPerMonth) : null;
   const metaCost = STAGES.META_COST_PER_LEAD;
 
-  const costFor = l => l.deal_creation === "auto" ? dfCost : (STAGES.isMetaSource(l.source) ? metaCost : null);
-  const originFor = l => l.deal_creation === "auto" ? "Dialfire" : (STAGES.isMetaSource(l.source) ? "Meta" : "Seller Lead Bank");
+  const originFor = l => STAGES.originOf(l);
+  const costFor = l => { const o = originFor(l); return o === "Dialfire" ? dfCost : (o === "Meta" ? metaCost : null); };
 
   // ── Sale lookup: matched_deal_id → best register row (prefer paid) ─────────
   const saleBy = new Map();

@@ -88,6 +88,19 @@ window.STAGES = (() => {
 
   function isQualified(stage) { return QUALIFIED.has(stage); }
   function isMetaSource(src)  { return META_SOURCE_RE.test(src || ""); }
+
+  // Single, canonical lead origin — one lead has exactly one origin, so counts
+  // never double-attribute. A deal auto-created by the calling pipe is Dialfire
+  // (even if the lead's marketing source says Meta — we dialled it, we worked
+  // it); otherwise a Meta-sourced lead is Meta; everything else is the Seller
+  // Lead Bank. This is the one place origin is decided — Overview and Lead P&L
+  // both defer to it so their Meta/Dialfire/SLB splits always agree.
+  function originOf(lead) {
+    if (lead && lead.deal_creation === "auto") return "Dialfire";
+    if (isMetaSource(lead && lead.source)) return "Meta";
+    return "Seller Lead Bank";
+  }
+  function isMetaLead(lead) { return originOf(lead) === "Meta"; }
   function isMandate(stage)   { return MANDATE.has(stage); }
   // Won the listing = has a mandate, or the rare fully-closed sale.
   function isWonListing(stage){ return MANDATE.has(stage) || stage === WON; }
@@ -98,6 +111,6 @@ window.STAGES = (() => {
     META_SOURCE_RE, META_COST_PER_LEAD, QUALIFIED_TARGET_COST, COMMISSION_RATE,
     CALLER_SALARIES_MONTHLY, CALLING_COST_MONTHLY, DIALFIRE_MONTHLY_COST,
     DIALFIRE_LEADS_PER_MONTH_FALLBACK,
-    orderIndex, isQualified, isMetaSource, isMandate, isWonListing, isLost,
+    orderIndex, isQualified, isMetaSource, originOf, isMetaLead, isMandate, isWonListing, isLost,
   };
 })();

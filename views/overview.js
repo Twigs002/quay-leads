@@ -26,7 +26,12 @@ window.VIEWS.overview = function (root, ctx) {
   // qualified = meta spend ÷ qualified META leads (same population, so the
   // figure is honest and the % can't exceed 100). Matched source strings are
   // surfaced so a wrong "meta" catch is obvious at a glance.
-  const metaLeads = leads.filter(l => STAGES.isMetaSource(l.source));
+  // Meta = single canonical origin (Meta-sourced AND not auto-created by the
+  // Dialfire pipe). A Meta-ad lead that the calling team dialled counts as
+  // Dialfire, not Meta — so this population, its R80 spend and its commission
+  // never double-count against Dialfire, and the Dialfire lead-source filter
+  // correctly shows zero Meta leads. See STAGES.originOf.
+  const metaLeads = leads.filter(l => STAGES.isMetaLead(l));
   const metaSpend = metaLeads.length * STAGES.META_COST_PER_LEAD;
   const qualifiedMeta = metaLeads.filter(l => STAGES.isQualified(l.current_stage));
   const costPerQualified = qualifiedMeta.length ? metaSpend / qualifiedMeta.length : null;
@@ -46,14 +51,33 @@ window.VIEWS.overview = function (root, ctx) {
     const prev = saleBy.get(k);
     if (!prev || (s.deal_status === "PAID_OUT" && prev.deal_status !== "PAID_OUT")) saleBy.set(k, s);
   }
-  let metaConfirmedComm = 0, metaSoldCount = 0;
+  let metaConfirmedComm = 0;
+  const metaSoldRows = [];
   for (const l of metaLeads) {
     const sale = l.deal_id ? saleBy.get(String(l.deal_id)) : null;
     if (sale && sale.deal_status === "PAID_OUT") {
-      metaConfirmedComm += Number(sale.total_gross_comm) || 0;
-      metaSoldCount++;
+      const comm = Number(sale.total_gross_comm) || 0;
+      metaConfirmedComm += comm;
+      metaSoldRows.push({
+        // Where it came from: the marketing source label (Meta - ig / fb).
+        source: (l.source || "").trim() || "Meta",
+        // Address: prefer the lead's property address, else the register street.
+        address: (l.property_address || `${sale.street_number || ""} ${sale.street_name || ""}`.trim() || "—"),
+        suburb: (sale.suburb || l.suburb || "").trim(),
+        team: (sale.division_name || l.division || "—"),   // which team/division sold it
+        agent: (sale.broker1_name || "—"),                 // listing/selling broker
+        entered: l.datestamp_d ? l.datestamp_d.toISOString().slice(0, 10) : "—",
+        transfer: sale.transfer_date ? String(sale.transfer_date).slice(0, 10) : null,
+        price: sale.purchase_price != null ? Number(sale.purchase_price) : null,
+        commPct: sale.commission_pct != null ? Number(sale.commission_pct) : null,
+        comm,                                              // full total agency commission
+        quayComm: Number(sale.quay1_gross_comm) || 0,      // Quay-retained (~half)
+        dealId: l.deal_id || "",
+      });
     }
   }
+  metaSoldRows.sort((a, b) => b.comm - a.comm);
+  const metaSoldCount = metaSoldRows.length;
 
   // ── Farming area (item: out-of-area = unqualified) ──────────────────────
   // A lead is out of area when its suburb isn't in the farmed set (or it's in
@@ -110,10 +134,10 @@ window.VIEWS.overview = function (root, ctx) {
           <div class="value">${costPerQualified == null ? "—" : rand0(costPerQualified)}</div>
           <div class="delta-row muted small">${costPerQualified == null ? "no qualified leads yet" : (overTarget ? "over target" : "on/under target")}</div>
         </div>
-        <div class="kpi" style="border-left:4px solid ${THEME.tokens.green};">
+        <div class="kpi${metaSoldCount ? " kpi-clickable" : ""}" id="meta-comm-card" style="border-left:4px solid ${THEME.tokens.green};"${metaSoldCount ? ' role="button" tabindex="0" title="Click for a breakdown of the deals that sold"' : ""}>
           <div class="label">Confirmed commission (Meta)</div>
           <div class="value">${metaSoldCount ? rand0(metaConfirmedComm) : "—"}</div>
-          <div class="delta-row muted small">${metaSoldCount ? `${metaSoldCount} sold &amp; paid · total agency commission` : "no Meta leads banked yet"}</div>
+          <div class="delta-row muted small">${metaSoldCount ? `${metaSoldCount} sold &amp; paid · total agency commission &nbsp;·&nbsp; <span class="link-cue">view breakdown →</span>` : "no Meta leads banked yet"}</div>
         </div>
       </div>
       <p class="muted small" style="margin-top: 10px;">
@@ -173,6 +197,85 @@ window.VIEWS.overview = function (root, ctx) {
       </section>
     </div>
   `;
+
+  // ── Confirmed-commission (Meta) breakdown modal ────────────────────────────
+  // Click the card → a modal listing every Meta lead that reached a paid sale:
+  // where it came from, the address, which team/agent closed it, when the lead
+  // entered, and what it banked. Read-only; closes on backdrop, ✕ or Esc.
+  (() => {
+    const card = document.getElementById("meta-comm-card");
+    if (!card || !metaSoldCount) return;
+
+    const grp = n => Math.round(Number(n) || 0).toLocaleString();
+    const randS = v => "R" + grp(v);
+    const sourcePill = src => {
+      const s = src.toLowerCase();
+      const c = s.includes("ig") || s.includes("insta") ? "#C13584"
+              : (s.includes("fb") || s.includes("facebook") ? "#1877F2" : THEME.tokens.yellowDeep);
+      return `<span class="pill" style="background:${c}22;color:${c};">${escapeHtml(src)}</span>`;
+    };
+    const rowHtml = r => `<tr>
+      <td>${sourcePill(r.source)}</td>
+      <td><strong>${escapeHtml(r.address)}</strong>${r.suburb ? `<div class="muted small">${escapeHtml(r.suburb)}</div>` : ""}</td>
+      <td>${escapeHtml(r.team)}</td>
+      <td>${escapeHtml(r.agent)}</td>
+      <td class="num">${escapeHtml(r.entered)}</td>
+      <td class="num">${r.price != null ? randS(r.price) : "—"}${r.commPct != null ? `<div class="muted small">${r.commPct}%</div>` : ""}</td>
+      <td class="num"><strong style="color:${THEME.tokens.green};">${randS(r.comm)}</strong></td>
+      <td class="num muted">${randS(r.quayComm)}</td>
+      <td>${r.dealId ? `<a href="${UTILS.hsDealLink(r.dealId)}" target="_blank" rel="noopener">Open ↗</a>` : ""}</td>
+    </tr>`;
+
+    const rangeLbl = (FILTERS && FILTERS.state && (FILTERS.state.range === "all" ? "all dates"
+      : (FILTERS.state.from && FILTERS.state.to
+          ? `${FILTERS.state.from.toISOString().slice(0,10)} → ${FILTERS.state.to.toISOString().slice(0,10)}`
+          : "current range"))) || "current range";
+
+    function openModal() {
+      if (document.getElementById("meta-comm-modal")) return;
+      const wrap = document.createElement("div");
+      wrap.className = "modal-overlay";
+      wrap.id = "meta-comm-modal";
+      wrap.innerHTML = `
+        <div class="modal-card" role="dialog" aria-modal="true" aria-label="Confirmed Meta commission breakdown">
+          <div class="modal-head">
+            <div>
+              <h3 style="margin:0;">Confirmed commission (Meta) — breakdown</h3>
+              <p class="muted small" style="margin:4px 0 0;">
+                ${grp(metaSoldCount)} Meta lead${metaSoldCount === 1 ? "" : "s"} traced to a paid sale ·
+                <strong>${randS(metaConfirmedComm)}</strong> total agency commission ·
+                ${escapeHtml(rangeLbl)}
+              </p>
+            </div>
+            <button class="modal-close" aria-label="Close" title="Close">✕</button>
+          </div>
+          <div class="modal-body">
+            <div class="table-wrap"><table class="dt">
+              <thead><tr>
+                <th>Source</th><th>Address</th><th>Team</th><th>Agent</th>
+                <th class="num">Lead entered</th><th class="num">Sale price</th>
+                <th class="num">Commission</th><th class="num">Quay keeps</th><th></th>
+              </tr></thead>
+              <tbody>${metaSoldRows.map(rowHtml).join("")}</tbody>
+            </table></div>
+            <p class="muted small" style="margin-top:10px;">
+              "Meta" here means the lead's marketing source was Meta and its deal was <em>not</em> auto-created by the
+              Dialfire calling pipe. "Commission" is the full agency fee the deal generated; "Quay keeps" is the
+              retained share after the broker split. Only sales matched to a paid row in the register are shown.
+            </p>
+          </div>
+        </div>`;
+      document.body.appendChild(wrap);
+      const close = () => { wrap.remove(); document.removeEventListener("keydown", onKey); };
+      const onKey = e => { if (e.key === "Escape") close(); };
+      wrap.addEventListener("click", e => { if (e.target === wrap) close(); });
+      wrap.querySelector(".modal-close").addEventListener("click", close);
+      document.addEventListener("keydown", onKey);
+    }
+
+    card.addEventListener("click", openModal);
+    card.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openModal(); } });
+  })();
 
   // Total-volume sparkline on the first KPI card
   (() => {

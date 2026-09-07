@@ -63,6 +63,21 @@ async function hsPatchOwner(token: string, objectType: string, id: string, owner
   return r.json();
 }
 
+// Business-hours write guard (Africa/Johannesburg / SAST). Interactive
+// reassignments are meant to happen after hours; refuse live HubSpot writes
+// between 06:00 and 18:00 SAST so we never mutate live data during the working
+// day. Set the REASSIGN_FORCE=1 secret to override (admin escape hatch).
+function withinBusinessHoursSAST(): boolean {
+  const hour = Number(
+    new Intl.DateTimeFormat("en-GB", {
+      timeZone: "Africa/Johannesburg",
+      hour: "2-digit",
+      hour12: false,
+    }).format(new Date()),
+  ) % 24; // some runtimes report midnight as "24"
+  return hour >= 6 && hour < 18;
+}
+
 async function hsDealContacts(token: string, dealId: string): Promise<string[]> {
   const r = await fetch(`${HS_API}/crm/v4/objects/deals/${dealId}/associations/contacts`, {
     headers: { Authorization: `Bearer ${token}` },
@@ -100,6 +115,11 @@ serve(async (req: Request) => {
   if (!staff) return json({ error: "No staff record for this account" }, 403, origin);
   if (staff.active === false) return json({ error: "Account is disabled" }, 403, origin);
   if (!staff.is_super && !staff.is_admin) return json({ error: "Superuser access required" }, 403, origin);
+
+  // Business-hours guard: refuse live writes 06:00–18:00 SAST unless forced.
+  if (Deno.env.get("REASSIGN_FORCE") !== "1" && withinBusinessHoursSAST()) {
+    return json({ error: "Inside business hours (06:00–18:00 SAST) — reassignment writes are disabled. Set REASSIGN_FORCE=1 to override." }, 403, origin);
+  }
 
   // 2. Parse + validate the requested move.
   const payload = await req.json().catch(() => ({}));

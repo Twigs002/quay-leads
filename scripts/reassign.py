@@ -32,6 +32,7 @@ import random
 import sys
 import time
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import requests
 from supabase import Client, create_client
@@ -44,6 +45,23 @@ IDLE_HOURS = 72
 DEDUPE_HOURS = 20          # don't re-log the same deal within a day
 HS_API = "https://api.hubapi.com"
 THROTTLE_S = 0.35
+
+# Armed HubSpot writes go out in small batches with a short pause between them
+# so a large backlog never bursts the HubSpot rate limit. Tunable.
+BATCH_SIZE = 20            # armed HubSpot moves per batch before pausing
+BATCH_PAUSE_S = 2.0        # seconds to pause between batches
+
+# Business hours in Africa/Johannesburg (SAST, UTC+2). Armed runs refuse to
+# write to HubSpot inside this window (see _within_business_hours / the guard
+# in main) so an accidental or manual daytime run can't mutate live data.
+BIZ_TZ = ZoneInfo("Africa/Johannesburg")
+BIZ_START_HOUR = 6         # 06:00 SAST inclusive
+BIZ_END_HOUR = 18          # 18:00 SAST exclusive
+
+
+def _within_business_hours() -> bool:
+    """True if the current Africa/Johannesburg time is 06:00–18:00 (SAST)."""
+    return BIZ_START_HOUR <= datetime.now(BIZ_TZ).hour < BIZ_END_HOUR
 
 
 def _need(name: str) -> str:
@@ -167,6 +185,19 @@ def main():
     args = ap.parse_args()
 
     armed = args.apply and os.environ.get("REASSIGN_ARM", "").strip() == "1"
+
+    # Business-hours write guard. This job is meant to run after hours (see the
+    # workflow cron). If an armed run somehow fires between 06:00 and 18:00 SAST
+    # — e.g. a manual workflow_dispatch — refuse the HubSpot writes so we never
+    # mutate live data while the team is working. Only guards armed writes; a
+    # normal DRY-RUN still logs its previews. Set REASSIGN_FORCE=1 to override
+    # (admin escape hatch) if a move genuinely must happen during the day.
+    if (armed and os.environ.get("REASSIGN_FORCE", "").strip() != "1"
+            and _within_business_hours()):
+        print("⛔ inside business hours (SAST) — skipping HubSpot writes "
+              "(set REASSIGN_FORCE=1 to override)")
+        return
+
     dry_run = not armed
     mode = "LIVE (armed)" if armed else "DRY-RUN (no HubSpot writes)"
     print(f"→ reassignment evaluator — {mode}")
@@ -188,6 +219,7 @@ def main():
 
     audit_rows = []
     would_move = 0
+    moves_done = 0            # armed HubSpot moves so far (drives batch pauses)
     sess = None
     if armed:
         sess = requests.Session()
@@ -256,6 +288,13 @@ def main():
         would_move += 1
 
         if armed:
+            # Small-batch throttle: pause between every BATCH_SIZE armed moves
+            # so a large backlog never bursts the HubSpot rate limit.
+            if moves_done and moves_done % BATCH_SIZE == 0:
+                print(f"  … {moves_done} moves done, pausing {BATCH_PAUSE_S}s "
+                      "before next batch")
+                time.sleep(BATCH_PAUSE_S)
+            moves_done += 1
             # Order matters for bounce-safety: (1) move the deal, (2) persist
             # the clock-reset + visited to Supabase BEFORE anything else so the
             # deal can't be re-picked on the next run even if a later step

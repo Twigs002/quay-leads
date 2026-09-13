@@ -48,12 +48,9 @@
       <nav class="tabs">
         <a href="#/overview"        data-tab="overview">Overview</a>
         <a href="#/sources"         data-tab="sources">Sources</a>
-        <a href="#/meta-report"     data-tab="meta-report">Meta 12-Mo</a>
         <a href="#/pipeline"        data-tab="pipeline">Pipeline</a>
-        <a href="#/finance"         data-tab="finance" data-super="1" hidden>Finance</a>
         <a href="#/attribution"     data-tab="attribution" data-super="1" hidden>Attribution</a>
         <a href="#/lead-pnl"        data-tab="lead-pnl" data-super="1" hidden>Lead P&amp;L</a>
-        <a href="#/action-tracker"  data-tab="action-tracker">Action Tracker</a>
         <a href="#/track"           data-tab="track">Track</a>
         <a href="#/reassignment"    data-tab="reassignment" data-super="1" hidden>Reassignment</a>
         <a href="#/raw-data"        data-tab="raw-data">Raw Data</a>
@@ -166,12 +163,12 @@
   <script defer src="filters.js"></script>
   <script defer src="views/overview.js"></script>
   <script defer src="views/sources.js"></script>
+  <!-- meta_report.js exposes window.renderMetaBlock, used by the Pipeline view;
+       it must load before pipeline.js. It no longer registers its own tab. -->
   <script defer src="views/meta_report.js"></script>
   <script defer src="views/pipeline.js"></script>
-  <script defer src="views/finance.js"></script>
   <script defer src="views/attribution.js"></script>
   <script defer src="views/lead_pnl.js"></script>
-  <script defer src="views/action_tracker.js"></script>
   <script defer src="views/track.js"></script>
   <script defer src="views/reassignment.js"></script>
   <script defer src="views/raw_data.js"></script>

@@ -96,6 +96,18 @@ window.VIEWS.pipeline = function (root, ctx) {
     <h2>Pipeline</h2>
     <p class="lede">How leads convert from inbound → qualified → deal → worked (call logged).</p>
 
+    <details class="card" id="meta-panel" style="padding: 0;">
+      <summary style="cursor:pointer; list-style:none; padding:14px 16px; font-weight:700; display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+        <span style="display:inline-flex; gap:3px;">
+          <span style="display:inline-block;width:11px;height:11px;border-radius:2px;background:${THEME.PALETTE[0]};"></span>
+          <span style="display:inline-block;width:11px;height:11px;border-radius:2px;background:${THEME.PALETTE[1]};"></span>
+        </span>
+        Meta channel — Facebook + Instagram
+        <span class="muted small" style="font-weight:400;">FB &amp; IG performance for the current filter · click to expand</span>
+      </summary>
+      <div id="meta-block" style="padding:0 16px 16px;"></div>
+    </details>
+
     <section class="card">
       <h3>Conversion funnel</h3>
       <div id="funnel-chart" style="height: 380px;"></div>
@@ -205,6 +217,24 @@ window.VIEWS.pipeline = function (root, ctx) {
       <div id="drill-content" style="margin-top: 16px;"></div>
     </section>
   `;
+
+  // Meta panel — collapsed by default. Plotly must size against a visible
+  // container, so render the Meta block lazily the first time it's opened.
+  const $metaPanel = document.getElementById("meta-panel");
+  const $metaBlock = document.getElementById("meta-block");
+  let metaRendered = false;
+  if ($metaPanel && $metaBlock && typeof window.renderMetaBlock === "function") {
+    $metaPanel.addEventListener("toggle", () => {
+      if (!$metaPanel.open || metaRendered) return;
+      metaRendered = true;
+      try {
+        window.renderMetaBlock($metaBlock, ctx);
+      } catch (e) {
+        console.error(e);
+        $metaBlock.innerHTML = `<div class="error-box">Meta block error: ${escapeHtml(e.message || String(e))}</div>`;
+      }
+    });
+  }
 
   // Funnel — rendered as a horizontal bar chart (the "funnel" trace type is
   // not in the plotly-basic bundle this app loads). Bars shrink top→bottom

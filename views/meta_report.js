@@ -1,11 +1,11 @@
-// Meta 12-month report — Facebook + Instagram leads: where they sit in the
-// pipeline and whether they've sold. Self-contained trailing-12-month window
-// built from the WHOLE book (ctx.cache.leads), so it ignores the sidebar date
-// range on purpose — it always reports the last 12 months. Division/source
-// scoping still comes from RLS server-side (super/admin see all; a team member
-// sees only their team's rows).
-window.VIEWS = window.VIEWS || {};
-window.VIEWS["meta-report"] = function (root, ctx) {
+// Meta channel block — Facebook + Instagram leads: where they sit in the
+// pipeline and whether they've sold. Exposed as window.renderMetaBlock so the
+// Pipeline view can drop it into a collapsible panel; it is NOT a standalone
+// tab. It follows the sidebar date filter like the rest of Pipeline — it reads
+// the already-filtered ctx.view.leads and derives its monthly-trend buckets
+// from whatever range is in view. Division/source scoping still comes from RLS
+// server-side (super/admin see all; a team member sees only their team's rows).
+window.renderMetaBlock = function (root, ctx) {
   const { escapeHtml, emptyState, pct, hsDealLink } = UTILS;
 
   // ── Platform classification ────────────────────────────────────────
@@ -22,41 +22,42 @@ window.VIEWS["meta-report"] = function (root, ctx) {
     return `<div class="bar ${cls}"><span style="width:${w}%"></span></div><span class="muted small">${p.toFixed(1)}%</span>`;
   };
 
-  // ── Trailing 12-month window (12 monthly buckets ending this month) ──
-  const now = new Date();
-  const monthKeyOf = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-  const monthKeys = [];
-  for (let i = 0; i < 12; i++) {
-    const d = new Date(now.getFullYear(), now.getMonth() - 11 + i, 1);
-    monthKeys.push(monthKeyOf(d));
-  }
-  const monthSet = new Set(monthKeys);
-  const monthLabel = (key) => {
-    const [y, m] = key.split("-");
-    return new Date(Number(y), Number(m) - 1, 1)
-      .toLocaleDateString("en-GB", { month: "short", year: "2-digit" });
-  };
-  const windowStart = new Date(now.getFullYear(), now.getMonth() - 11, 1);
-  const windowLabel = `${windowStart.toLocaleDateString("en-GB", { month: "short", year: "numeric" })} – ${now.toLocaleDateString("en-GB", { month: "short", year: "numeric" })}`;
-
-  // Whole book, not the sidebar-filtered view. Keep only Meta leads whose
-  // datestamp falls inside one of the 12 buckets (drops stray future/old dates).
-  const all = (ctx.cache && ctx.cache.leads) || ctx.view.leads;
-  const leads = all.filter((l) => {
-    const p = platformOf(l);
-    if (!p) return false;
-    if (!l.datestamp_d) return false;
-    return monthSet.has(monthKeyOf(l.datestamp_d));
-  });
+  // Sidebar-filtered book (same source the rest of Pipeline uses). Keep every
+  // Meta lead in view — no window of our own; the sidebar owns the date range.
+  const source = (ctx.view && ctx.view.leads) || ctx.cache.leads || [];
+  const leads = source.filter((l) => platformOf(l));
   leads.forEach((l) => { l._platform = platformOf(l); });
 
   const matchedSources = Array.from(new Set(leads.map((l) => l.source).filter(Boolean))).sort();
 
   if (!leads.length) {
-    root.innerHTML = `<h2>Meta 12-month report</h2>` +
-      emptyState("No Facebook or Instagram leads in the last 12 months.");
+    root.innerHTML = emptyState("No Facebook or Instagram leads in the current filter.");
     return;
   }
+
+  // ── Monthly-trend buckets, derived from the filtered data ──────────
+  // Contiguous months from the earliest to the latest dated Meta lead in view
+  // (so gaps show as zero), capped so a very wide filter can't explode the axis.
+  const MAX_MONTHS = 36;
+  const monthKeyOf = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  const monthLabel = (key) => {
+    const [y, m] = key.split("-");
+    return new Date(Number(y), Number(m) - 1, 1)
+      .toLocaleDateString("en-GB", { month: "short", year: "2-digit" });
+  };
+  const dated = leads.filter((l) => l.datestamp_d);
+  let monthKeys = [];
+  if (dated.length) {
+    const times = dated.map((l) => l.datestamp_d.getTime());
+    let d = new Date(Math.min(...times)); d = new Date(d.getFullYear(), d.getMonth(), 1);
+    const end = new Date(Math.max(...times));
+    const endStop = new Date(end.getFullYear(), end.getMonth(), 1);
+    while (d <= endStop && monthKeys.length < MAX_MONTHS) {
+      monthKeys.push(monthKeyOf(d));
+      d = new Date(d.getFullYear(), d.getMonth() + 1, 1);
+    }
+  }
+  const monthSet = new Set(monthKeys);
 
   // ── Aggregates ─────────────────────────────────────────────────────
   const isQual = (l) => STAGES.isQualified(l.current_stage);
@@ -102,8 +103,10 @@ window.VIEWS["meta-report"] = function (root, ctx) {
 
   // ── Monthly volume, split FB / IG ──────────────────────────────────
   const mv = { Facebook: {}, Instagram: {} };
-  for (const l of leads) mv[l._platform][monthKeyOf(l.datestamp_d)] =
-    (mv[l._platform][monthKeyOf(l.datestamp_d)] || 0) + 1;
+  for (const l of dated) {
+    const k = monthKeyOf(l.datestamp_d);
+    if (monthSet.has(k)) mv[l._platform][k] = (mv[l._platform][k] || 0) + 1;
+  }
 
   // ── Render ─────────────────────────────────────────────────────────
   const perfRow = (name, s, colour) => `
@@ -120,17 +123,15 @@ window.VIEWS["meta-report"] = function (root, ctx) {
     </tr>`;
 
   root.innerHTML = `
-    <h2>Meta 12-month report</h2>
-    <p class="lede">Facebook and Instagram leads over the last 12 months — where they sit in the pipeline now, and which ones won a mandate or sold.</p>
     <p class="section-caption">
-      Window: <strong>${escapeHtml(windowLabel)}</strong> (trailing 12 months, whole book — this report ignores the sidebar date range on purpose).
+      Facebook + Instagram leads in the current filter — where they sit in the pipeline now, and which ones won a mandate or sold.
       Counted as Meta from source: ${matchedSources.map((s) => `<span class="pill">${escapeHtml(s)}</span>`).join(" ")}.
       <strong>Sold</strong> = HubSpot <em>Sold</em> stage · <strong>Won listing</strong> = a Sole/Other Mandate or Sold (the realistic point commission is secured; almost nothing reaches <em>Sold</em> in HubSpot).
     </p>
 
     <div class="kpis">
       <div class="kpi" style="border-left:4px solid ${THEME.tokens.blue};">
-        <div class="label">Meta leads (12 mo)</div>
+        <div class="label">Meta leads</div>
         <div class="value">${T.leads.toLocaleString()}</div>
         <div class="delta-row muted small">${F.leads.toLocaleString()} FB · ${I.leads.toLocaleString()} IG</div>
       </div>
@@ -191,21 +192,22 @@ window.VIEWS["meta-report"] = function (root, ctx) {
       </div>
     </section>
 
+    ${monthKeys.length ? `
     <section class="card">
       <h3>Monthly lead volume</h3>
-      <p class="section-caption">Facebook vs Instagram leads received per month across the 12-month window.</p>
+      <p class="section-caption">Facebook vs Instagram leads received per month across the filtered range.</p>
       <div id="meta-monthly-chart" style="height: 380px;"></div>
-    </section>
+    </section>` : ""}
 
     <section class="card">
       <h3>Where they are now</h3>
-      <p class="section-caption">Current HubSpot stage for all ${T.leads.toLocaleString()} Meta leads in the window, in pipeline order. <strong>No deal yet</strong> = never converted to a HubSpot deal.</p>
+      <p class="section-caption">Current HubSpot stage for all ${T.leads.toLocaleString()} Meta leads in view, in pipeline order. <strong>No deal yet</strong> = never converted to a HubSpot deal.</p>
       <div id="meta-stage-chart" style="height: ${Math.max(360, 30 * stageOrder.length + 80)}px;"></div>
     </section>
 
     <section>
       <h3>Won listings &amp; sales</h3>
-      <p class="section-caption">Every Meta lead that reached a mandate or sold in the window — ${outcomes.length.toLocaleString()} in total. This is the "did they sell" answer.</p>
+      <p class="section-caption">Every Meta lead that reached a mandate or sold in view — ${outcomes.length.toLocaleString()} in total. This is the "did they sell" answer.</p>
       <div class="table-wrap">
         <table class="dt">
           <thead><tr>
@@ -234,20 +236,22 @@ window.VIEWS["meta-report"] = function (root, ctx) {
               <td>${date}</td>
               <td class="num">${link}</td>
             </tr>`;
-          }).join("") || `<tr><td colspan="8" class="muted" style="padding:14px;">No mandates or sales from Meta leads in the last 12 months.</td></tr>`}</tbody>
+          }).join("") || `<tr><td colspan="8" class="muted" style="padding:14px;">No mandates or sales from Meta leads in view.</td></tr>`}</tbody>
         </table>
       </div>
     </section>
   `;
 
   // Monthly volume — grouped bars, FB vs IG.
-  Plotly.newPlot("meta-monthly-chart", [
-    { type: "bar", name: "Facebook", x: monthKeys.map(monthLabel),
-      y: monthKeys.map((k) => mv.Facebook[k] || 0), marker: { color: THEME.PALETTE[0] } },
-    { type: "bar", name: "Instagram", x: monthKeys.map(monthLabel),
-      y: monthKeys.map((k) => mv.Instagram[k] || 0), marker: { color: THEME.PALETTE[1] } },
-  ], { ...THEME.PLOTLY_LAYOUT, barmode: "group",
-       yaxis: { ...THEME.PLOTLY_LAYOUT.yaxis, title: "Leads" } }, THEME.PLOTLY_CONFIG);
+  if (monthKeys.length) {
+    Plotly.newPlot("meta-monthly-chart", [
+      { type: "bar", name: "Facebook", x: monthKeys.map(monthLabel),
+        y: monthKeys.map((k) => mv.Facebook[k] || 0), marker: { color: THEME.PALETTE[0] } },
+      { type: "bar", name: "Instagram", x: monthKeys.map(monthLabel),
+        y: monthKeys.map((k) => mv.Instagram[k] || 0), marker: { color: THEME.PALETTE[1] } },
+    ], { ...THEME.PLOTLY_LAYOUT, barmode: "group",
+         yaxis: { ...THEME.PLOTLY_LAYOUT.yaxis, title: "Leads" } }, THEME.PLOTLY_CONFIG);
+  }
 
   // Where they are — horizontal stage bar, chronological top→bottom.
   Plotly.newPlot("meta-stage-chart", [{

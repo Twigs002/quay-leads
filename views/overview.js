@@ -167,9 +167,6 @@ window.VIEWS.overview = function (root, ctx) {
           <div class="label">Backlog</div>
           <div class="value">${leads.filter(l => !l.has_deal && !l.worked).length.toLocaleString()}</div>
         </div>
-        <p class="muted" style="margin-top: 12px;">
-          Work them in <a href="#/action-tracker">Action Tracker</a>.
-        </p>
       </section>
     </div>
   `;

@@ -154,9 +154,13 @@
     }, ms);
   }
 
-  // Old finance tabs merged into one "Finance" page — redirect legacy hashes
-  // so bookmarks and in-app links keep working.
-  const ROUTE_ALIAS = { cfo: "finance", costings: "finance", actuals: "finance" };
+  // Redirect legacy / removed hashes so bookmarks and in-app links keep working.
+  // Finance and Action Tracker were retired → Overview; the old Meta 12-month
+  // report tab now lives inside Pipeline as a collapsible panel → Pipeline.
+  const ROUTE_ALIAS = {
+    cfo: "overview", costings: "overview", actuals: "overview",
+    finance: "overview", "action-tracker": "overview", "meta-report": "pipeline",
+  };
 
   function router(user, cache) {
     const hash = location.hash || "#/overview";

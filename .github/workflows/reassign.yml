@@ -1,14 +1,14 @@
 name: Reassign stale leads (daily)
 
-# Open-border stale-lead reassignment runs ONCE A DAY after hours (19:00 UTC ≈
-# 21:00 SAST), independent of the 30-min data sync. Leads therefore jump teams
-# at most once per day, and never during business hours. Default is DRY-RUN: it
-# logs intended moves to lead_reassignments and writes NOTHING to HubSpot. To
-# arm live moves later, set repo variable REASSIGN_ARM=1 and it will pass
-# --apply.
+# Open-border stale-lead reassignment runs ONCE A DAY after hours (20:00 UTC ≈
+# 22:00 SAST / 10pm), independent of the 30-min data sync. Leads therefore jump
+# teams at most once per day, and never during business hours. Default is
+# DRY-RUN: it logs intended moves to lead_reassignments and writes NOTHING to
+# HubSpot. To arm live moves later, set repo variable REASSIGN_ARM=1 and it will
+# pass --apply.
 on:
   schedule:
-    - cron: '0 19 * * *'
+    - cron: '0 20 * * *'
   workflow_dispatch:
     inputs:
       apply:

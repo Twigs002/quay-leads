@@ -51,6 +51,17 @@ THROTTLE_S = 0.35
 BATCH_SIZE = 20            # armed HubSpot moves per batch before pausing
 BATCH_PAUSE_S = 2.0        # seconds to pause between batches
 
+# 429 / transient-5xx backoff. THROTTLE_S already keeps us to ~28 req/10s, well
+# under HubSpot's 190-per-10s burst limit, so we should never see a 429 under
+# normal load. This is defence-in-depth: if HubSpot ever returns 429 (e.g. the
+# account-wide DAILY limit is hit by another app sharing the token) or a
+# transient 5xx, retry a few times with exponential backoff, honouring the
+# Retry-After header when present, instead of silently failing the move.
+HS_MAX_RETRIES = 5         # attempts per request before giving up
+HS_BACKOFF_BASE_S = 2.0    # base for exponential backoff (2, 4, 8, …), capped
+HS_BACKOFF_CAP_S = 30.0    # never sleep longer than this between retries
+HS_RETRY_STATUS = {429, 502, 503, 504}
+
 # Business hours in Africa/Johannesburg (SAST, UTC+2). Armed runs refuse to
 # write to HubSpot inside this window (see _within_business_hours / the guard
 # in main) so an accidental or manual daytime run can't mutate live data.
@@ -156,24 +167,53 @@ def pick_target(group_teams: list[dict], from_owner: str, visited: set[str],
     return rng.choice(pool)
 
 
+def _retry_after_seconds(resp, attempt: int) -> float:
+    """How long to sleep before the next retry: honour HubSpot's Retry-After
+    header when present, else exponential backoff (base^attempt) capped."""
+    hdr = resp.headers.get("Retry-After") if resp is not None else None
+    if hdr:
+        try:
+            return min(float(hdr), HS_BACKOFF_CAP_S)
+        except ValueError:
+            pass
+    return min(HS_BACKOFF_BASE_S ** attempt, HS_BACKOFF_CAP_S)
+
+
+def hs_request(sess, method: str, url: str, **kwargs):
+    """Single HubSpot call, throttled and retried on 429 / transient 5xx.
+
+    THROTTLE_S paces us well under the 190-req/10s burst limit; this adds
+    resilience so a rate-limit (429, incl. the account-wide DAILY policy) or a
+    momentary 5xx backs off and retries — honouring Retry-After — rather than
+    failing the move. Raises on the final attempt or any non-retryable error."""
+    for attempt in range(1, HS_MAX_RETRIES + 1):
+        time.sleep(THROTTLE_S)
+        r = sess.request(method, url, timeout=30, **kwargs)
+        if r.status_code in HS_RETRY_STATUS and attempt < HS_MAX_RETRIES:
+            wait = _retry_after_seconds(r, attempt)
+            print(f"  ⏳ HubSpot {r.status_code} on {method} {url.rsplit('/', 2)[-1]} "
+                  f"— retry {attempt}/{HS_MAX_RETRIES - 1} in {wait:.1f}s")
+            time.sleep(wait)
+            continue
+        r.raise_for_status()
+        return r
+    # Exhausted retries on a retryable status: surface it.
+    r.raise_for_status()
+    return r
+
+
 def hs_patch_owner(sess, object_type: str, object_id: str, owner_id: str):
     """Live HubSpot owner PATCH. Only reached in armed --apply mode."""
-    time.sleep(THROTTLE_S)
-    r = sess.patch(
-        f"{HS_API}/crm/v3/objects/{object_type}/{object_id}",
-        json={"properties": {"hubspot_owner_id": str(owner_id)}},
-        timeout=30,
-    )
-    r.raise_for_status()
+    r = hs_request(sess, "PATCH",
+                   f"{HS_API}/crm/v3/objects/{object_type}/{object_id}",
+                   json={"properties": {"hubspot_owner_id": str(owner_id)}})
     return r.json()
 
 
 def fetch_deal_contacts(sess, deal_id: str) -> list[str]:
     """Contact ids associated with a deal. Armed --apply mode only."""
-    time.sleep(THROTTLE_S)
-    r = sess.get(f"{HS_API}/crm/v4/objects/deals/{deal_id}/associations/contacts",
-                 timeout=30)
-    r.raise_for_status()
+    r = hs_request(sess, "GET",
+                   f"{HS_API}/crm/v4/objects/deals/{deal_id}/associations/contacts")
     return [str(x.get("toObjectId")) for x in (r.json().get("results") or [])
             if x.get("toObjectId")]
 

@@ -251,7 +251,6 @@ window.VIEWS = window.VIEWS || {};
     const curLeads = CTX.view.leads;                       // NB: leaderboard shows all segments (not focus-filtered)
     const groups = {};
     for (const l of curLeads) { const g = of(l); if (g == null) continue; (groups[g] = groups[g] || []).push(l); }
-    const cmp = comparisonLeads();                          // already focus-filtered, but focus is per-segment here; recompute unfocused
     const cmpAll = (function () {
       const w = comparisonWindow(); if (!w) return null;
       const [f, t] = w, nd = nonDatePred();
@@ -307,16 +306,18 @@ window.VIEWS = window.VIEWS || {};
 
   function renderVelocity() {
     const now = new Date();
-    const open = currentLeads().filter((l) => l.datestamp_d && !l.worked
-      && !STAGES.isWonListing(l.current_stage) && !STAGES.isLost(l.current_stage)
-      && l.current_stage !== STAGES.OUT_OF_AREA);
+    // Match the nightly reassignment sweep exactly: qualifying stages with zero
+    // logged calls (DATA.REASSIGN_STAGES), so ">72 h · no call" is the real
+    // backlog it moves — not every open unworked stage.
+    const RS = (window.DATA && window.DATA.REASSIGN_STAGES) || ["External Lead", "Calling Lead", "Inbound Lead"];
+    const open = currentLeads().filter((l) => l.datestamp_d && (l.num_calls || 0) === 0 && RS.includes(l.current_stage));
     const ageH = (l) => (now - l.datestamp_d) / 36e5;
     const b = [0, 0, 0, 0]; // 0-24, 24-72, 72-168, >168
     for (const l of open) { const h = ageH(l); b[h < 24 ? 0 : h < 72 ? 1 : h < 168 ? 2 : 3]++; }
     const total = open.length || 1;
     const over72 = b[2] + b[3];
     document.getElementById("pp-vel").innerHTML =
-      kpiCard("Open &amp; unworked", fmtInt(open.length), '<span class="muted">in the current filter</span>') +
+      kpiCard("Reassignable backlog", fmtInt(open.length), '<span class="muted">qualifying stages, 0 calls</span>') +
       `<div class="kpi"><div class="label">&gt;72&nbsp;h · no call</div><div class="value" style="color:${over72 / total > 0.34 ? "var(--red)" : "var(--yellow-deep)"};">${(over72 / total * 100).toFixed(0)}%</div><div class="delta-row muted">reassignment backlog</div></div>` +
       kpiCard("7&nbsp;days+ stale", fmtInt(b[3]), '<span class="muted">oldest, no call logged</span>');
     const labels = ["0–24 h", "24–72 h", "72 h – 7 d", "> 7 d"];
@@ -338,13 +339,16 @@ window.VIEWS = window.VIEWS || {};
     const key = S.metric, M = METRICS[key], isPct = M.kind === "pct";
     const leads = trendLeads();
     if (!leads.length) { document.getElementById("pp-trend").innerHTML = UTILS.emptyState("No leads to chart."); return; }
-    const curYear = Math.max(...leads.map((l) => l.datestamp_d.getFullYear()));
+    // Cap at the real current year — the book carries a few bad future
+    // datestamps (see filters.js), which would otherwise push the whole overlay
+    // off-window and render two near-empty lines.
+    const curYear = Math.min(new Date().getFullYear(), Math.max(...leads.map((l) => l.datestamp_d.getFullYear())));
     const prevYear = curYear - 1;
     const maxMonthCur = Math.max(...leads.filter((l) => l.datestamp_d.getFullYear() === curYear).map((l) => l.datestamp_d.getMonth()));
     const bucket = (yr) => { const arr = Array.from({ length: 12 }, () => []);
       for (const l of leads) if (l.datestamp_d.getFullYear() === yr) arr[l.datestamp_d.getMonth()].push(l); return arr; };
     const seriesOf = (yr, cur) => bucket(yr).map((arr, i) =>
-      (cur && i > maxMonthCur) ? null : metricVal(key, summarize(arr)));
+      ((cur && i > maxMonthCur) || arr.length === 0) ? null : metricVal(key, summarize(arr)));
     const cur = seriesOf(curYear, true), prev = seriesOf(prevYear, false);
     const showPrev = S.cmp !== "off";
 

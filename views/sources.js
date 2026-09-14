@@ -14,7 +14,7 @@ window.VIEWS.sources = function (root, ctx) {
   // 'real' types are present; "junk" filtering happens upstream)
   const bySrc = {};
   for (const l of leads) {
-    const k = l.source || "(unknown)";
+    const k = STAGES.canonicalSource(l.source);
     if (!bySrc[k]) bySrc[k] = { total: 0, seller: 0, owner: 0, hasDeal: 0, worked: 0 };
     bySrc[k].total++;
     if (l.is_lead === "Seller Lead") bySrc[k].seller++;
@@ -78,11 +78,11 @@ window.VIEWS.sources = function (root, ctx) {
   for (const l of leads) {
     if (!l.datestamp_d) continue;
     const m = `${l.datestamp_d.getFullYear()}-${String(l.datestamp_d.getMonth() + 1).padStart(2, "0")}`;
-    const k = `${m}|${l.source || "(unknown)"}`;
+    const k = `${m}|${STAGES.canonicalSource(l.source)}`;
     monthly[k] = (monthly[k] || 0) + 1;
   }
   const months = Array.from(new Set(Object.keys(monthly).map(k => k.split("|")[0]))).sort();
-  const srcs = Array.from(new Set(leads.map(l => l.source || "(unknown)"))).sort();
+  const srcs = Array.from(new Set(leads.map(l => STAGES.canonicalSource(l.source)))).sort();
   const traces = srcs.map(src => ({
     type: "bar", name: src,
     x: months,
@@ -96,13 +96,14 @@ window.VIEWS.sources = function (root, ctx) {
   const top6 = rows.slice(0, 6).map(r => r.src);
   const weekly = {};
   for (const l of leads) {
-    if (!l.datestamp_d || !top6.includes(l.source)) continue;
+    const csrc = STAGES.canonicalSource(l.source);
+    if (!l.datestamp_d || !top6.includes(csrc)) continue;
     const monday = new Date(l.datestamp_d);
     const day = monday.getDay();
     monday.setDate(monday.getDate() - ((day + 6) % 7));
     monday.setHours(0, 0, 0, 0);
     const w = monday.toISOString().slice(0, 10);
-    const k = `${w}|${l.source}`;
+    const k = `${w}|${csrc}`;
     weekly[k] = (weekly[k] || 0) + 1;
   }
   const weeks = Array.from(new Set(Object.keys(weekly).map(k => k.split("|")[0]))).sort();

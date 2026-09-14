@@ -33,9 +33,12 @@ window.VIEWS.pipeline = function (root, ctx) {
   const stageCmap = THEME.stageColors(stageRows.map(r => r[0]));
   const stagePct = (s) => probN[s] ? Math.round((probSum[s] / probN[s]) * 100) : null;
 
-  // Sales outcomes (item: "sold by us" vs "sold by competitor").
+  // Sales outcomes (item: "sold by us" vs "lost to competitor").
+  // Competitor-lost is the full set (Listed with Competitor + Sold by
+  // Competitor), not just STAGES.LOST — otherwise "Sold by Competitor" deals are
+  // dropped and the win rate reads higher than reality.
   const soldUs   = leads.filter(l => l.current_stage === STAGES.WON);
-  const soldComp = leads.filter(l => l.current_stage === STAGES.LOST);
+  const soldComp = leads.filter(l => STAGES.isLost(l.current_stage));
   const sumAmt   = arr => arr.reduce((a, l) => a + (Number(l.amount) || 0), 0);
   const soldUsVal = sumAmt(soldUs), soldCompVal = sumAmt(soldComp);
   const totalSold = soldUs.length + soldComp.length;
@@ -122,7 +125,7 @@ window.VIEWS.pipeline = function (root, ctx) {
 
     <section class="card">
       <h3>Sales outcomes</h3>
-      <p class="section-caption"><strong>Sold by us</strong> = deals in the <em>Sold</em> stage · <strong>Sold by competitor</strong> = <em>Listed with Competitor</em>. Win rate = our sales ÷ all resolved sales.</p>
+      <p class="section-caption"><strong>Sold by us</strong> = deals in the <em>Sold</em> stage · <strong>Lost to competitor</strong> = <em>Listed with Competitor</em> or <em>Sold by Competitor</em>. Win rate = our sales ÷ all resolved outcomes.</p>
       <div class="kpis" style="margin-top: 4px;">
         <div class="kpi" style="border-left:4px solid ${THEME.tokens.green};">
           <div class="label">Sold by us</div>
@@ -130,7 +133,7 @@ window.VIEWS.pipeline = function (root, ctx) {
           <div class="delta-row muted small">${randMoney(soldUsVal)}</div>
         </div>
         <div class="kpi" style="border-left:4px solid #B91C1C;">
-          <div class="label">Sold by competitor</div>
+          <div class="label">Lost to competitor</div>
           <div class="value">${soldComp.length.toLocaleString()}</div>
           <div class="delta-row muted small">${randMoney(soldCompVal)}</div>
         </div>

@@ -12,10 +12,14 @@ window.VIEWS.overview = function (root, ctx) {
   const now = new Date();
   const cutoff = (days) => { const d = new Date(now); d.setDate(now.getDate() - days); return d; };
   const c30 = cutoff(30), c60 = cutoff(60), c7 = cutoff(7), c14 = cutoff(14);
-  const last30 = leads.filter(l => l.datestamp_d && l.datestamp_d >= c30).length;
-  const prev30 = leads.filter(l => l.datestamp_d && l.datestamp_d >= c60 && l.datestamp_d < c30).length;
-  const last7  = leads.filter(l => l.datestamp_d && l.datestamp_d >= c7).length;
-  const prev7  = leads.filter(l => l.datestamp_d && l.datestamp_d >= c14 && l.datestamp_d < c7).length;
+  // Rolling-window KPIs are absolute ("last 30 days"), so compute them from the
+  // whole book — not ctx.view.leads, which is already date-filtered (a 30d/7d
+  // preset would otherwise empty the previous window and drop the delta).
+  const book = (ctx.cache && ctx.cache.leads) || leads;
+  const last30 = book.filter(l => l.datestamp_d && l.datestamp_d >= c30).length;
+  const prev30 = book.filter(l => l.datestamp_d && l.datestamp_d >= c60 && l.datestamp_d < c30).length;
+  const last7  = book.filter(l => l.datestamp_d && l.datestamp_d >= c7).length;
+  const prev7  = book.filter(l => l.datestamp_d && l.datestamp_d >= c14 && l.datestamp_d < c7).length;
   const seller = leads.filter(l => l.is_lead === "Seller Lead").length;
   const hasDeal = leads.filter(l => l.has_deal).length;
   const worked = leads.filter(l => l.worked).length;

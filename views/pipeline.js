@@ -1,11 +1,221 @@
 // Pipeline view — funnel + live stage bar + division leaderboard + per-division breakdown.
 window.VIEWS = window.VIEWS || {};
+
+// ── Lead economics panel ───────────────────────────────────────────────
+// A cost layer on the Pipeline view: what a qualified lead costs us, per
+// source, over the sidebar date range and filters. Cost-per-lead values live
+// in localStorage so they survive a reload; the picked source and the
+// qualified-stage checkboxes are module-scoped so a filter re-render never
+// resets them. All money is ZAR, R prefix, spaced thousands, rounded for
+// display only. No em or en dashes anywhere here.
+const __ECON_COST_LS = "quayLeads.leadEconCostPerLead.v1";
+let __econState = { source: null, stages: null };   // stages: Set, null = not built
+
+function _econLoadCosts() {
+  try {
+    const m = JSON.parse(localStorage.getItem(__ECON_COST_LS));
+    return (m && typeof m === "object") ? m : {};
+  } catch (_) { return {}; }
+}
+function _econSaveCost(key, val) {
+  const m = _econLoadCosts();
+  if (val === null || val === "" || !Number.isFinite(val)) delete m[key];
+  else m[key] = val;
+  try { localStorage.setItem(__ECON_COST_LS, JSON.stringify(m)); } catch (_) {}
+}
+function _econCostOf(key) {
+  const v = _econLoadCosts()[key];
+  return Number.isFinite(v) ? v : null;
+}
+// "R13 840" style: R prefix, space thousands separator, no decimals.
+function _econRand(v) {
+  const n = Math.round(Number(v) || 0);
+  const s = Math.abs(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+  return "R" + (n < 0 ? "-" + s : s);
+}
+// Which paid channel a lead belongs to. Same taxonomy the Lead economics view
+// uses (originFor): the calling pipe (auto) is Dialfire, a Meta / Facebook / fb
+// source is Meta, everything else is the Seller Lead Bank sheet book.
+function _econChannel(l) {
+  if (l && l.deal_creation === "auto") return "Dialfire";
+  if (l && STAGES.isMetaSource(l.source)) return "Meta / Facebook";
+  return "Seller Lead Bank";
+}
 window.VIEWS.pipeline = function (root, ctx) {
   const leads = ctx.view.leads;
-  const { escapeHtml, emptyState } = UTILS;
+  const { escapeHtml, escapeAttr, emptyState } = UTILS;
   if (!leads.length) {
     root.innerHTML = `<h2>Pipeline</h2>${emptyState()}`;
     return;
+  }
+
+  // ── Lead economics: source channels + qualified-stage set ─────────────
+  // Options are built from the whole book (ctx.cache.leads) so a source or a
+  // stage never disappears when the sidebar filters narrow things. The figures
+  // themselves are computed over the filtered view (leads = ctx.view.leads), so
+  // the panel moves with the sidebar date range and filters.
+  const allBook = (ctx.cache && ctx.cache.leads) || leads;
+  // Seed Meta at R80 the very first time only; after that the director owns
+  // every figure (clearing a value sticks, we never re-seed over it).
+  if (localStorage.getItem(__ECON_COST_LS) === null) {
+    _econSaveCost("Meta / Facebook", STAGES.META_COST_PER_LEAD);
+  }
+  const ECON_CHANNEL_ORDER = ["Meta / Facebook", "Dialfire", "Seller Lead Bank"];
+  const econChannels = (() => {
+    const seen = new Set();
+    for (const l of allBook) seen.add(_econChannel(l));
+    const ordered = ECON_CHANNEL_ORDER.filter(c => seen.has(c));
+    for (const c of seen) if (!ordered.includes(c)) ordered.push(c);
+    return ordered;
+  })();
+  const econStages = (() => {
+    const seen = new Set();
+    for (const l of allBook) if (l.has_deal) seen.add(l.current_stage || "Unknown stage");
+    return [...seen].sort((a, b) => STAGES.orderIndex(a) - STAGES.orderIndex(b));
+  })();
+  if (__econState.stages === null) __econState.stages = new Set(econStages);
+  if (!__econState.source || !econChannels.includes(__econState.source)) {
+    __econState.source = econChannels.includes("Meta / Facebook")
+      ? "Meta / Facebook" : (econChannels[0] || null);
+  }
+
+  // Pure calculation for one channel + a set of checked (qualifying) stages,
+  // over the currently filtered leads. Total spend uses the LEAD count and
+  // never depends on the checkboxes; only qualified deals (the denominator)
+  // move when a stage is toggled.
+  function econCompute(channel, checked) {
+    const inChannel = leads.filter(l => _econChannel(l) === channel);
+    const n = inChannel.length;
+    const deals = inChannel.filter(l => l.has_deal);
+    let qualified = 0;
+    for (const d of deals) if (checked.has(d.current_stage || "Unknown stage")) qualified++;
+    const cost = _econCostOf(channel);
+    const spend = cost == null ? null : n * cost;
+    const cpq = (cost == null || qualified === 0) ? null : spend / qualified;   // divide raw, round only on display
+    return { leads: n, totalDeals: deals.length, qualified, cost, spend, cpq };
+  }
+
+  function econPanelHtml() {
+    const ch = __econState.source;
+    const e = econCompute(ch, __econState.stages);
+    const dash = "-";
+    const spendStr = e.cost == null ? dash : _econRand(e.spend);
+    const cplStr   = e.cost == null ? dash : _econRand(e.cost);
+    const cpqStr   = e.cpq  == null ? dash : _econRand(e.cpq);
+    const spendSub = e.cost == null
+      ? `${e.leads.toLocaleString()} lead${e.leads === 1 ? "" : "s"} · enter a cost per lead below`
+      : `${e.leads.toLocaleString()} lead${e.leads === 1 ? "" : "s"} x ${_econRand(e.cost)}`;
+    const cpqSub = `${e.qualified.toLocaleString()} qualified of ${e.totalDeals.toLocaleString()} deal${e.totalDeals === 1 ? "" : "s"}`;
+
+    const sourceOpts = econChannels
+      .map(c => `<option value="${escapeAttr(c)}"${c === ch ? " selected" : ""}>${escapeHtml(c)}</option>`)
+      .join("");
+    const costs = _econLoadCosts();
+    const costRows = econChannels.map(c => {
+      const cv = Number.isFinite(costs[c]) ? costs[c] : "";
+      return `<label style="display:flex; align-items:center; gap:8px; font-size:13px;">
+        <span class="muted" style="flex:0 0 auto;">R</span>
+        <input type="text" inputmode="numeric" data-econ-cost="${escapeAttr(c)}" value="${escapeAttr(String(cv))}"
+               placeholder="enter"
+               style="width:96px; padding:6px 8px; border:1px solid var(--line); border-radius:8px; font:inherit; text-align:right; font-variant-numeric:tabular-nums;">
+        <span>${escapeHtml(c)}</span>
+      </label>`;
+    }).join("");
+    const stageRows = econStages.map(s => {
+      const on = __econState.stages.has(s);
+      return `<label style="display:flex; align-items:center; gap:6px; font-size:13px;">
+        <input type="checkbox" data-econ-stage="${escapeAttr(s)}"${on ? " checked" : ""}>
+        <span>${escapeHtml(s)}</span>
+      </label>`;
+    }).join("");
+
+    return `
+      <section class="card" style="padding:16px 20px;">
+        <h3 style="margin:0 0 4px;">Lead economics</h3>
+        <p class="section-caption" style="margin-top:0;">
+          What a qualified lead costs us, per source, over the current sidebar date range and filters.
+          Total spend is leads x cost per lead and does not move when you change the qualified stages, only the
+          cost per qualified lead does.
+        </p>
+
+        <div style="display:flex; gap:16px; flex-wrap:wrap; align-items:flex-end; margin:10px 0 14px;">
+          <label style="flex:0 0 240px; min-width:220px;">
+            <div class="muted small" style="margin-bottom:4px;">Source</div>
+            <select id="econ-source" style="width:100%; padding:8px 10px; border:1px solid var(--line); border-radius:8px; font:inherit;">
+              ${sourceOpts}
+            </select>
+          </label>
+          <div class="muted small" style="padding-bottom:9px;">Date range and filters: set in the sidebar.</div>
+        </div>
+
+        <div class="kpis" style="margin-top:4px;">
+          <div class="kpi" style="border-left:4px solid var(--slate);">
+            <div class="label">Total spend</div>
+            <div class="value" id="econ-spend">${spendStr}</div>
+            <div class="delta-row muted small" id="econ-spend-sub">${escapeHtml(spendSub)}</div>
+          </div>
+          <div class="kpi">
+            <div class="label">Cost per lead</div>
+            <div class="value" id="econ-cpl">${cplStr}</div>
+            <div class="delta-row muted small" id="econ-cpl-sub">${escapeHtml(ch || "")}</div>
+          </div>
+          <div class="kpi" style="border-left:4px solid var(--yellow);">
+            <div class="label">Cost per qualified lead</div>
+            <div class="value" id="econ-cpq">${cpqStr}</div>
+            <div class="delta-row muted small" id="econ-cpq-sub">${escapeHtml(cpqSub)}</div>
+          </div>
+        </div>
+
+        <div style="display:flex; gap:28px; flex-wrap:wrap; margin-top:18px;">
+          <div style="flex:1 1 260px; min-width:240px;">
+            <div class="muted small" style="text-transform:uppercase; letter-spacing:0.04em; margin-bottom:8px;">
+              Cost per lead by source (ZAR, saved on this device)
+            </div>
+            <div style="display:flex; flex-direction:column; gap:8px;">${costRows}</div>
+          </div>
+          <div style="flex:1 1 260px; min-width:240px;">
+            <div class="muted small" style="text-transform:uppercase; letter-spacing:0.04em; margin-bottom:8px;">
+              Stages that count as qualified
+            </div>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:4px 16px;">${stageRows}</div>
+          </div>
+        </div>
+      </section>
+    `;
+  }
+
+  function econRecalc() {
+    const e = econCompute(__econState.source, __econState.stages);
+    const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+    const dash = "-";
+    set("econ-spend", e.cost == null ? dash : _econRand(e.spend));
+    set("econ-cpl",   e.cost == null ? dash : _econRand(e.cost));
+    set("econ-cpq",   e.cpq  == null ? dash : _econRand(e.cpq));
+    set("econ-spend-sub", e.cost == null
+      ? `${e.leads.toLocaleString()} lead${e.leads === 1 ? "" : "s"} · enter a cost per lead below`
+      : `${e.leads.toLocaleString()} lead${e.leads === 1 ? "" : "s"} x ${_econRand(e.cost)}`);
+    set("econ-cpl-sub", __econState.source || "");
+    set("econ-cpq-sub", `${e.qualified.toLocaleString()} qualified of ${e.totalDeals.toLocaleString()} deal${e.totalDeals === 1 ? "" : "s"}`);
+  }
+
+  function econWire() {
+    const sel = document.getElementById("econ-source");
+    if (sel) sel.addEventListener("change", () => { __econState.source = sel.value; econRecalc(); });
+    root.querySelectorAll("[data-econ-cost]").forEach(inp => {
+      inp.addEventListener("input", () => {
+        const raw = inp.value.replace(/[^\d]/g, "");   // digits only; blank = cleared
+        if (raw !== inp.value) inp.value = raw;
+        _econSaveCost(inp.dataset.econCost, raw === "" ? null : Number(raw));
+        econRecalc();
+      });
+    });
+    root.querySelectorAll("[data-econ-stage]").forEach(cb => {
+      cb.addEventListener("change", () => {
+        const st = cb.dataset.econStage;
+        if (cb.checked) __econState.stages.add(st); else __econState.stages.delete(st);
+        econRecalc();
+      });
+    });
   }
 
   // Funnel
@@ -99,7 +309,9 @@ window.VIEWS.pipeline = function (root, ctx) {
     <h2>Pipeline</h2>
     <p class="lede">How leads convert from inbound → qualified → deal → worked (call logged).</p>
 
-    <details class="card" id="meta-panel" style="padding: 0;">
+    ${econPanelHtml()}
+
+    <details class="card" id="meta-panel" style="padding: 0; margin-top:16px;">
       <summary style="cursor:pointer; list-style:none; padding:14px 16px; font-weight:700; display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
         <span style="display:inline-flex; gap:3px;">
           <span style="display:inline-block;width:11px;height:11px;border-radius:2px;background:${THEME.PALETTE[0]};"></span>
@@ -220,6 +432,10 @@ window.VIEWS.pipeline = function (root, ctx) {
       <div id="drill-content" style="margin-top: 16px;"></div>
     </section>
   `;
+
+  // Wire the lead economics panel (source pick, per-source cost inputs,
+  // qualified-stage checkboxes). Toggles recalc figures live, no re-render.
+  econWire();
 
   // Meta panel — collapsed by default. Plotly must size against a visible
   // container, so render the Meta block lazily the first time it's opened.

@@ -160,6 +160,8 @@
   const ROUTE_ALIAS = {
     cfo: "overview", costings: "overview", actuals: "overview",
     finance: "overview", "action-tracker": "overview", "meta-report": "pipeline",
+    // Attribution + Lead P&L merged into one "Lead economics" report.
+    attribution: "lead-economics", "lead-pnl": "lead-economics",
   };
 
   function router(user, cache) {

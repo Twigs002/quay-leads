@@ -90,7 +90,11 @@ window.DATA = (() => {
       _allRows("team_activity_daily"),
     ]);
     for (const l of enriched) {
-      l.datestamp_d = l.datestamp ? new Date(l.datestamp) : null;
+      // Guard invalid dates like the sibling date fields below: an unparseable
+      // datestamp must become null, not a truthy Invalid Date (which would leak
+      // past the sidebar date filter and crash toISOString() in the charts).
+      const _ds = l.datestamp ? new Date(l.datestamp) : null;
+      l.datestamp_d = _ds && !isNaN(_ds) ? _ds : null;
       l.has_deal = !!l.has_deal;
       l.worked = !!l.worked;
       l.num_calls = l.num_calls || 0;

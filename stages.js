@@ -88,6 +88,17 @@ window.STAGES = (() => {
 
   function isQualified(stage) { return QUALIFIED.has(stage); }
   function isMetaSource(src)  { return META_SOURCE_RE.test(src || ""); }
+  // Collapse the documented Meta label variance ("Meta - fb", "fb", "Facebook",
+  // "Meta - ig", "ig", bare "Meta") into canonical channels so a single channel
+  // isn't split across rows/series. Non-Meta sources pass through trimmed.
+  function canonicalSource(src) {
+    const s = (src || "").trim();
+    if (!s) return "(unknown)";
+    if (/\b(instagram|ig)\b/i.test(s)) return "Instagram";
+    if (/\b(facebook|fb)\b/i.test(s)) return "Facebook";
+    if (/\bmeta\b/i.test(s)) return "Meta";
+    return s;
+  }
   function isMandate(stage)   { return MANDATE.has(stage); }
   // Won the listing = has a mandate, or the rare fully-closed sale.
   function isWonListing(stage){ return MANDATE.has(stage) || stage === WON; }
@@ -98,6 +109,6 @@ window.STAGES = (() => {
     META_SOURCE_RE, META_COST_PER_LEAD, QUALIFIED_TARGET_COST, COMMISSION_RATE,
     CALLER_SALARIES_MONTHLY, CALLING_COST_MONTHLY, DIALFIRE_MONTHLY_COST,
     DIALFIRE_LEADS_PER_MONTH_FALLBACK,
-    orderIndex, isQualified, isMetaSource, isMandate, isWonListing, isLost,
+    orderIndex, isQualified, isMetaSource, canonicalSource, isMandate, isWonListing, isLost,
   };
 })();

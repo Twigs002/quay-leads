@@ -103,6 +103,7 @@
                 `New data will land in ~90 sec — page will auto-reload then. ` +
                 `<a href="${escapeHtml(res.run_url || "#")}" target="_blank" rel="noopener">Watch on GitHub →</a>`,
           ms: 10000,
+          html: true,
         });
         $refresh.textContent = "Syncing… 90s";
         setTimeout(() => location.reload(), 105000);
@@ -114,12 +115,13 @@
             title: "Edge Function not deployed",
             body: "Opened GitHub Actions in a new tab — click <strong>Run workflow</strong> to start a sync.",
             ms: 8000,
+            html: true,
           });
           $refresh.innerHTML = refreshHtml;
           $refresh.disabled = false;
           return;
         }
-        toast({ title: "Could not trigger sync", body: escapeHtml(msg), ms: 6000 });
+        toast({ title: "Could not trigger sync", body: msg, ms: 6000 });
         $refresh.innerHTML = refreshHtml;
         $refresh.disabled = false;
       }
@@ -133,19 +135,22 @@
         await DATA.loadAll(true);
         location.reload();
       } catch (e) {
-        toast({ title: "Reload failed", body: escapeHtml(e.message || String(e)), ms: 6000 });
+        toast({ title: "Reload failed", body: e.message || String(e), ms: 6000 });
         $reload.disabled = false;
         $reload.innerHTML = reloadHtml;
       }
     });
   }
 
-  // Toast: title and body are BOTH treated as trusted HTML. Callers must
-  // escape any dynamic content. Use UTILS.escapeHtml().
-  function toast({ title, body, ms = 5000 }) {
+  // Toast: `title` is always escaped. `body` is rendered as escaped text by
+  // default (safe for arbitrary/dynamic strings). Pass `html: true` to render
+  // trusted markup in `body` — those callers MUST escape any dynamic content
+  // themselves via UTILS.escapeHtml().
+  function toast({ title, body, ms = 5000, html = false }) {
     const t = document.createElement("div");
     t.className = "toast";
-    t.innerHTML = `<div class="toast-title">${escapeHtml(title)}</div><div>${body}</div>`;
+    const bodyHtml = html ? (body || "") : escapeHtml(body);
+    t.innerHTML = `<div class="toast-title">${escapeHtml(title)}</div><div>${bodyHtml}</div>`;
     document.body.appendChild(t);
     requestAnimationFrame(() => t.classList.add("show"));
     setTimeout(() => {

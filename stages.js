@@ -23,9 +23,16 @@ window.STAGES = (() => {
     "Referred to Rentals",
     "Let By Us",
     "Not My Area",
-    "Please delete (Provide note)",
     "Past Let - Leakage",
   ];
+
+  // Junk / placeholder stages that exist in HubSpot but must never surface as a
+  // real pipeline stage in the dashboard (e.g. a stage renamed to a note asking
+  // for its own deletion). Filtered out of stage pickers so they can't be shown
+  // or counted as qualified.
+  const HIDDEN = new Set([
+    "Please delete (Provide note)",
+  ]);
 
   // A lead counts as "qualified" once its deal reaches warm, hot, any
   // mandate, or sold. Drives cost-per-qualified-lead on the Overview.
@@ -87,6 +94,7 @@ window.STAGES = (() => {
   }
 
   function isQualified(stage) { return QUALIFIED.has(stage); }
+  function isHidden(stage)    { return HIDDEN.has(stage); }
   function isMetaSource(src)  { return META_SOURCE_RE.test(src || ""); }
   // Collapse the documented Meta label variance ("Meta - fb", "fb", "Facebook",
   // "Meta - ig", "ig", bare "Meta") into canonical channels so a single channel
@@ -105,10 +113,10 @@ window.STAGES = (() => {
   function isLost(stage)      { return COMPETITOR_LOST.has(stage); }
 
   return {
-    ORDER, QUALIFIED, WON, LOST, NURTURE, OUT_OF_AREA, MANDATE, COMPETITOR_LOST,
+    ORDER, QUALIFIED, HIDDEN, WON, LOST, NURTURE, OUT_OF_AREA, MANDATE, COMPETITOR_LOST,
     META_SOURCE_RE, META_COST_PER_LEAD, QUALIFIED_TARGET_COST, COMMISSION_RATE,
     CALLER_SALARIES_MONTHLY, CALLING_COST_MONTHLY, DIALFIRE_MONTHLY_COST,
     DIALFIRE_LEADS_PER_MONTH_FALLBACK,
-    orderIndex, isQualified, isMetaSource, canonicalSource, isMandate, isWonListing, isLost,
+    orderIndex, isQualified, isHidden, isMetaSource, canonicalSource, isMandate, isWonListing, isLost,
   };
 })();

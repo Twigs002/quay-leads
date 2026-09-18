@@ -70,7 +70,12 @@ window.VIEWS.pipeline = function (root, ctx) {
   })();
   const econStages = (() => {
     const seen = new Set();
-    for (const l of allBook) if (l.has_deal) seen.add(l.current_stage || "Unknown stage");
+    for (const l of allBook) {
+      if (!l.has_deal) continue;
+      const s = l.current_stage || "Unknown stage";
+      if (STAGES.isHidden(s)) continue;   // junk/placeholder stages never qualify
+      seen.add(s);
+    }
     return [...seen].sort((a, b) => STAGES.orderIndex(a) - STAGES.orderIndex(b));
   })();
   if (__econState.stages === null) __econState.stages = new Set(econStages);

@@ -78,16 +78,30 @@ window.DATA = (() => {
     return rows;
   }
 
+  // Like _allRows, but tolerates the table/view not existing yet (before its
+  // migration lands) by returning []. Any other error still propagates.
+  async function _allRowsOptional(table, select = "*") {
+    try {
+      return await _allRows(table, select);
+    } catch (e) {
+      if (_missingTable(e)) return [];
+      throw e;
+    }
+  }
+
   async function loadAll(force = false) {
     if (_cache && !force) return _cache;
     // ONE paginated query against the leads_enriched view (joins leads +
     // hs_deal_state + latest lead_actions server-side). Down from 4
     // parallel chains × ~12 round trips → 1 chain × ~12 round trips with
     // joins already done.
+    // Tolerate any of these not existing yet (before its migration lands) so a
+    // single missing table/view doesn't break the whole boot — same handling as
+    // stageValue/salesDeals below.
     const [enriched, status, teamActivity] = await Promise.all([
-      _allRows("leads_enriched"),
-      _allRows("sync_status"),
-      _allRows("team_activity_daily"),
+      _allRowsOptional("leads_enriched"),
+      _allRowsOptional("sync_status"),
+      _allRowsOptional("team_activity_daily"),
     ]);
     for (const l of enriched) {
       // Guard invalid dates like the sibling date fields below: an unparseable

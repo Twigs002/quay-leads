@@ -70,10 +70,21 @@ window.VIEWS.pipeline = function (root, ctx) {
   })();
   const econStages = (() => {
     const seen = new Set();
-    for (const l of allBook) if (l.has_deal) seen.add(l.current_stage || "Unknown stage");
+    for (const l of allBook) {
+      if (!l.has_deal) continue;
+      const s = l.current_stage || "Unknown stage";
+      if (STAGES.isHidden(s)) continue;   // junk/placeholder stages never qualify
+      seen.add(s);
+    }
     return [...seen].sort((a, b) => STAGES.orderIndex(a) - STAGES.orderIndex(b));
   })();
-  if (__econState.stages === null) __econState.stages = new Set(econStages);
+  // Default the "qualified" set to the stages that actually count as qualified
+  // (warm/hot/mandate/sold), not every stage — otherwise cost-per-qualified on
+  // first load is really cost-per-deal. The director can still tick others.
+  if (__econState.stages === null) {
+    const dflt = econStages.filter(s => STAGES.isQualified(s));
+    __econState.stages = new Set(dflt.length ? dflt : econStages);
+  }
   if (!__econState.source || !econChannels.includes(__econState.source)) {
     __econState.source = econChannels.includes("Meta / Facebook")
       ? "Meta / Facebook" : (econChannels[0] || null);

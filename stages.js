@@ -19,7 +19,8 @@ window.STAGES = (() => {
     "Listed - Sole Mandate",
     "Listed - Other Mandate",
     "Listed with Competitor",
-    "Sold",
+    "Sold by Competitor",
+    "Sold By Us",
     "Referred to Rentals",
     "Let By Us",
     "Not My Area",
@@ -41,10 +42,10 @@ window.STAGES = (() => {
     "Contacted - Hot Lead",
     "Listed - Sole Mandate",
     "Listed - Other Mandate",
-    "Sold",
+    "Sold By Us",
   ]);
 
-  const WON  = "Sold";                    // closed sale by us
+  const WON  = "Sold By Us";              // closed sale by us (HubSpot stage string)
   const LOST = "Listed with Competitor";  // listed elsewhere
   const NURTURE = "Contacted - Lead to Nurture";
   const OUT_OF_AREA = "Not My Area";      // HubSpot's own out-of-farming-area marker

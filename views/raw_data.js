@@ -105,6 +105,9 @@ window.VIEWS["raw-data"] = function (root, ctx) {
 
 function csvCell(v) {
   if (v === null || v === undefined) return "";
-  const s = String(v);
+  let s = String(v);
+  // Neutralise spreadsheet formula injection: a leading = + - @ (or tab/CR) makes
+  // Excel/Sheets execute the cell. Prefix with a single quote so it stays text.
+  if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }

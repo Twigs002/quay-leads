@@ -4,9 +4,10 @@ window.VIEWS = window.VIEWS || {};
 // ── Lead economics panel ───────────────────────────────────────────────
 // A cost layer on the Pipeline view: what a qualified lead costs us, per
 // source, over the sidebar date range and filters. Cost-per-lead values live
-// in localStorage so they survive a reload; the picked source and the
-// qualified-stage checkboxes are module-scoped so a filter re-render never
-// resets them. All money is ZAR, R prefix, spaced thousands, rounded for
+// in localStorage so they survive a reload; the qualified-stage checkboxes are
+// module-scoped so a filter re-render never resets them (the panel follows the
+// sidebar source filter - no source picker). All money is ZAR, R prefix,
+// spaced thousands, rounded for
 // display only. No em or en dashes anywhere here.
 const __ECON_COST_LS = "quayLeads.leadEconCostPerLead.v1";
 let __econState = { stages: null };   // stages: Set, null = not built (no source picker; the panel follows the sidebar source filter)
@@ -66,7 +67,12 @@ window.VIEWS.pipeline = function (root, ctx) {
   })();
   const econStages = (() => {
     const seen = new Set();
-    for (const l of allBook) if (l.has_deal) seen.add(l.current_stage || "Unknown stage");
+    for (const l of allBook) {
+      if (!l.has_deal) continue;
+      const s = l.current_stage || "Unknown stage";
+      if (STAGES.isHidden(s)) continue;   // junk/placeholder stages never qualify
+      seen.add(s);
+    }
     return [...seen].sort((a, b) => STAGES.orderIndex(a) - STAGES.orderIndex(b));
   })();
   // Default: everything qualifies except the "dead" stages (please delete,

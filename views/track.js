@@ -365,22 +365,22 @@ window.VIEWS["track"] = function (root, ctx) {
     // Expanded detail: sheet → HubSpot chain
     const rows = [
       ["Arrived on sheet",    fmtDate(l.datestamp) + (l.datestamp ? ` (${humanAgo(new Date(l.datestamp))})` : "")],
-      ["Source",              l.source || "—"],
-      ["Client name",         l.client_name || "—"],
-      ["Email",               l.email || "—"],
-      ["Phone",               l.phone || "—"],
-      ["Property address",    l.property_address || "—"],
-      ["Suburb",              l.suburb || "—"],
-      ["Property type",       l.property_type || "—"],
-      ["Sheet division",      l.division || "—"],
-      ["Lead type",           l.is_lead || "—"],
-      ["Timeline (sheet)",    l.timeline || "—"],
-      ["Relationship",        l.relationship || "—"],
+      ["Source",              l.source ? escapeHtml(l.source) : "—"],
+      ["Client name",         l.client_name ? escapeHtml(l.client_name) : "—"],
+      ["Email",               l.email ? escapeHtml(l.email) : "—"],
+      ["Phone",               l.phone ? escapeHtml(l.phone) : "—"],
+      ["Property address",    l.property_address ? escapeHtml(l.property_address) : "—"],
+      ["Suburb",              l.suburb ? escapeHtml(l.suburb) : "—"],
+      ["Property type",       l.property_type ? escapeHtml(l.property_type) : "—"],
+      ["Sheet division",      l.division ? escapeHtml(l.division) : "—"],
+      ["Lead type",           l.is_lead ? escapeHtml(l.is_lead) : "—"],
+      ["Timeline (sheet)",    l.timeline ? escapeHtml(l.timeline) : "—"],
+      ["Relationship",        l.relationship ? escapeHtml(l.relationship) : "—"],
       null, // separator
       ["HubSpot deal ID",     l.deal_id
         ? `<a href="${_hsDealLink(l.deal_id)}" target="_blank" rel="noopener">${escapeHtml(l.deal_id)} ↗</a>`
         : "(none)"],
-      ["Deal name",           l.deal_name || "—"],
+      ["Deal name",           l.deal_name ? escapeHtml(l.deal_name) : "—"],
       ["Current stage",       l.current_stage
         ? `<span class="pill ${tone === "muted" ? "" : tone}">${escapeHtml(l.current_stage)}</span>`
         : "—"],

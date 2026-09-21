@@ -19,18 +19,26 @@ window.STAGES = (() => {
     "Listed - Sole Mandate",
     "Listed - Other Mandate",
     "Listed with Competitor",
-    "Sold",
+    "Sold by Competitor",
+    "Sold By Us",
     "Referred to Rentals",
     "Let By Us",
     "Not My Area",
-    "Please delete (Provide note)",
     "Past Let - Leakage",
   ];
 
+  // Junk / placeholder stages that exist in HubSpot but must never surface as a
+  // real pipeline stage in the dashboard (e.g. a stage renamed to a note asking
+  // for its own deletion). Filtered out of stage pickers so they can't be shown
+  // or counted as qualified.
+  const HIDDEN = new Set([
+    "Please delete (Provide note)",
+  ]);
+
   // A lead counts as "qualified" for cost-per-qualified-lead if its deal has
-  // reached ANY real pipeline stage except the three "dead" outcomes below.
+  // reached ANY real pipeline stage except the "dead" outcomes below.
   // Director's rule (2026-09-21): "technically anything except please delete,
-  // Past Let - Leakage and Sold by Competitor". So every other stage in ORDER
+  // Past Let - Leakage and Sold by Competitor". Every other stage in ORDER
   // qualifies - early calling/inbound/rental leads, nurture, warm, hot, any
   // mandate, listed with competitor, referred, let by us, not-my-area, sold.
   const NOT_QUALIFIED = new Set([
@@ -42,7 +50,7 @@ window.STAGES = (() => {
   // count as qualified (a lead with no deal is not a qualified lead).
   const NO_STAGE = new Set(["", "No deal yet", "Unknown stage"]);
 
-  const WON  = "Sold";                    // closed sale by us
+  const WON  = "Sold By Us";              // closed sale by us (HubSpot stage string)
   const LOST = "Listed with Competitor";  // listed elsewhere
   const NURTURE = "Contacted - Lead to Nurture";
   const OUT_OF_AREA = "Not My Area";      // HubSpot's own out-of-farming-area marker
@@ -92,9 +100,10 @@ window.STAGES = (() => {
   }
 
   function isQualified(stage) {
-    if (!stage || NO_STAGE.has(stage) || NOT_QUALIFIED.has(stage)) return false;
+    if (!stage || NO_STAGE.has(stage) || HIDDEN.has(stage) || NOT_QUALIFIED.has(stage)) return false;
     return true;
   }
+  function isHidden(stage)    { return HIDDEN.has(stage); }
   function isMetaSource(src)  { return META_SOURCE_RE.test(src || ""); }
   // Collapse the documented Meta label variance ("Meta - fb", "fb", "Facebook",
   // "Meta - ig", "ig", bare "Meta") into canonical channels so a single channel
@@ -113,10 +122,10 @@ window.STAGES = (() => {
   function isLost(stage)      { return COMPETITOR_LOST.has(stage); }
 
   return {
-    ORDER, NOT_QUALIFIED, WON, LOST, NURTURE, OUT_OF_AREA, MANDATE, COMPETITOR_LOST,
+    ORDER, NOT_QUALIFIED, HIDDEN, WON, LOST, NURTURE, OUT_OF_AREA, MANDATE, COMPETITOR_LOST,
     META_SOURCE_RE, META_COST_PER_LEAD, QUALIFIED_TARGET_COST, COMMISSION_RATE,
     CALLER_SALARIES_MONTHLY, CALLING_COST_MONTHLY, DIALFIRE_MONTHLY_COST,
     DIALFIRE_LEADS_PER_MONTH_FALLBACK,
-    orderIndex, isQualified, isMetaSource, canonicalSource, isMandate, isWonListing, isLost,
+    orderIndex, isQualified, isHidden, isMetaSource, canonicalSource, isMandate, isWonListing, isLost,
   };
 })();

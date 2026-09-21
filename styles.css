@@ -744,3 +744,15 @@ table.dt td.num, table.dt th.num { text-align: right; font-variant-numeric: tabu
 .switch input:disabled { cursor: not-allowed; }
 .switch input:disabled + .switch-track { opacity: .45; }
 .switch.save-error .switch-track { outline: 2px solid var(--red); outline-offset: 1px; }
+
+/* ── Print / PDF export ──────────────────────────────────────────────────
+   Triggered by a view's "Export PDF" button (window.print) or Cmd/Ctrl+P.
+   Hides the app chrome so only the current view prints as a clean report;
+   anything marked .no-print (export button, bulk toggles) is dropped too. */
+@media print {
+  .topnav, .sidebar, .no-print { display: none !important; }
+  .body { display: block !important; }
+  .view { padding: 0 !important; max-width: none !important; }
+  section, .card, .kpi { break-inside: avoid; page-break-inside: avoid; }
+  body { background: #fff !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}

@@ -148,7 +148,7 @@ window.renderMetaBlock = function (root, ctx) {
       <div class="kpi" style="border-left:4px solid ${THEME.tokens.warmAmber};">
         <div class="label">Qualified</div>
         <div class="value">${T.qualified.toLocaleString()}</div>
-        <div class="delta-row muted small">${pct(T.qualified, T.leads)} · warm/hot/mandate/sold</div>
+        <div class="delta-row muted small">${pct(T.qualified, T.leads)} · any stage except delete/leakage/competitor-sold</div>
       </div>
       <div class="kpi" style="border-left:4px solid ${THEME.tokens.yellowDeep};">
         <div class="label">Won listing (mandate+sold)</div>

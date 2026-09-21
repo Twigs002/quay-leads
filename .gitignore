@@ -31,3 +31,6 @@ supabase/.temp/
 .idea/
 .vscode/
 *.swp
+
+# local git worktrees
+.worktrees/

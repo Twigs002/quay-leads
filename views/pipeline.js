@@ -73,7 +73,10 @@ window.VIEWS.pipeline = function (root, ctx) {
     for (const l of allBook) if (l.has_deal) seen.add(l.current_stage || "Unknown stage");
     return [...seen].sort((a, b) => STAGES.orderIndex(a) - STAGES.orderIndex(b));
   })();
-  if (__econState.stages === null) __econState.stages = new Set(econStages);
+  // Default: everything qualifies except the "dead" stages (please delete,
+  // Past Let - Leakage, Sold by Competitor) - see STAGES.isQualified. The
+  // director can still tick those back on; the box just starts on the rule.
+  if (__econState.stages === null) __econState.stages = new Set(econStages.filter(STAGES.isQualified));
   if (!__econState.source || !econChannels.includes(__econState.source)) {
     __econState.source = econChannels.includes("Meta / Facebook")
       ? "Meta / Facebook" : (econChannels[0] || null);

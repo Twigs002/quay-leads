@@ -27,15 +27,20 @@ window.STAGES = (() => {
     "Past Let - Leakage",
   ];
 
-  // A lead counts as "qualified" once its deal reaches warm, hot, any
-  // mandate, or sold. Drives cost-per-qualified-lead on the Overview.
-  const QUALIFIED = new Set([
-    "Contacted - Warm Lead (Courtesy)",
-    "Contacted - Hot Lead",
-    "Listed - Sole Mandate",
-    "Listed - Other Mandate",
-    "Sold",
+  // A lead counts as "qualified" for cost-per-qualified-lead if its deal has
+  // reached ANY real pipeline stage except the three "dead" outcomes below.
+  // Director's rule (2026-09-21): "technically anything except please delete,
+  // Past Let - Leakage and Sold by Competitor". So every other stage in ORDER
+  // qualifies - early calling/inbound/rental leads, nurture, warm, hot, any
+  // mandate, listed with competitor, referred, let by us, not-my-area, sold.
+  const NOT_QUALIFIED = new Set([
+    "Please delete (Provide note)",
+    "Past Let - Leakage",
+    "Sold by Competitor",
   ]);
+  // Placeholder / non-stage values that mean "no real deal stage" and so never
+  // count as qualified (a lead with no deal is not a qualified lead).
+  const NO_STAGE = new Set(["", "No deal yet", "Unknown stage"]);
 
   const WON  = "Sold";                    // closed sale by us
   const LOST = "Listed with Competitor";  // listed elsewhere
@@ -86,7 +91,10 @@ window.STAGES = (() => {
     return i === -1 ? ORDER.length : i;
   }
 
-  function isQualified(stage) { return QUALIFIED.has(stage); }
+  function isQualified(stage) {
+    if (!stage || NO_STAGE.has(stage) || NOT_QUALIFIED.has(stage)) return false;
+    return true;
+  }
   function isMetaSource(src)  { return META_SOURCE_RE.test(src || ""); }
   // Collapse the documented Meta label variance ("Meta - fb", "fb", "Facebook",
   // "Meta - ig", "ig", bare "Meta") into canonical channels so a single channel
@@ -105,7 +113,7 @@ window.STAGES = (() => {
   function isLost(stage)      { return COMPETITOR_LOST.has(stage); }
 
   return {
-    ORDER, QUALIFIED, WON, LOST, NURTURE, OUT_OF_AREA, MANDATE, COMPETITOR_LOST,
+    ORDER, NOT_QUALIFIED, WON, LOST, NURTURE, OUT_OF_AREA, MANDATE, COMPETITOR_LOST,
     META_SOURCE_RE, META_COST_PER_LEAD, QUALIFIED_TARGET_COST, COMMISSION_RATE,
     CALLER_SALARIES_MONTHLY, CALLING_COST_MONTHLY, DIALFIRE_MONTHLY_COST,
     DIALFIRE_LEADS_PER_MONTH_FALLBACK,

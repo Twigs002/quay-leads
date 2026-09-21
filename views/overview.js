@@ -25,8 +25,9 @@ window.VIEWS.overview = function (root, ctx) {
   const worked = leads.filter(l => l.worked).length;
 
   // ── Cost per qualified lead (item: R80 per meta lead) ───────────────────
-  // Spend = (# meta-sourced leads) × R80. A META lead is "qualified" once
-  // its HubSpot deal reaches warm / hot / any mandate / sold. Cost per
+  // Spend = (# meta-sourced leads) × R80. A META lead is "qualified" once its
+  // HubSpot deal reaches any real stage except please delete / Past Let -
+  // Leakage / Sold by Competitor (see STAGES.isQualified). Cost per
   // qualified = meta spend ÷ qualified META leads (same population, so the
   // figure is honest and the % can't exceed 100). Matched source strings are
   // surfaced so a wrong "meta" catch is obvious at a glance.
@@ -103,7 +104,7 @@ window.VIEWS.overview = function (root, ctx) {
       <h3>Cost per qualified lead</h3>
       <p class="section-caption">
         Meta leads costed at <strong>${rand0(STAGES.META_COST_PER_LEAD)}</strong> each.
-        <em>Qualified</em> = deal reached warm, hot, any mandate, or sold.
+        <em>Qualified</em> = any deal stage except Please delete, Past Let - Leakage, or Sold by Competitor.
         Reference target: <strong>${rand0(STAGES.QUALIFIED_TARGET_COST)}</strong> per qualified lead.
       </p>
       <div class="kpis" style="margin-top: 4px;">

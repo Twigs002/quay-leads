@@ -83,9 +83,10 @@ window.VIEWS.pipeline = function (root, ctx) {
   }
 
   // Pure calculation for one channel + a set of checked (qualifying) stages,
-  // over the currently filtered leads. Total spend uses the LEAD count and
-  // never depends on the checkboxes; only qualified deals (the denominator)
-  // move when a stage is toggled.
+  // over the currently filtered leads (so it always matches the sidebar date
+  // range). Total spend uses the DEAL count (every deal that has come in for
+  // this channel in range) and never depends on the checkboxes, so it stays
+  // put as stages are toggled; only qualified deals (the CPQ denominator) move.
   function econCompute(channel, checked) {
     const inChannel = leads.filter(l => _econChannel(l) === channel);
     const n = inChannel.length;
@@ -93,7 +94,7 @@ window.VIEWS.pipeline = function (root, ctx) {
     let qualified = 0;
     for (const d of deals) if (checked.has(d.current_stage || "Unknown stage")) qualified++;
     const cost = _econCostOf(channel);
-    const spend = cost == null ? null : n * cost;
+    const spend = cost == null ? null : deals.length * cost;
     const cpq = (cost == null || qualified === 0) ? null : spend / qualified;   // divide raw, round only on display
     return { leads: n, totalDeals: deals.length, qualified, cost, spend, cpq };
   }
@@ -106,8 +107,8 @@ window.VIEWS.pipeline = function (root, ctx) {
     const cplStr   = e.cost == null ? dash : _econRand(e.cost);
     const cpqStr   = e.cpq  == null ? dash : _econRand(e.cpq);
     const spendSub = e.cost == null
-      ? `${e.leads.toLocaleString()} lead${e.leads === 1 ? "" : "s"} · enter a cost per lead below`
-      : `${e.leads.toLocaleString()} lead${e.leads === 1 ? "" : "s"} x ${_econRand(e.cost)}`;
+      ? `${e.totalDeals.toLocaleString()} deal${e.totalDeals === 1 ? "" : "s"} · enter a cost per lead below`
+      : `${e.totalDeals.toLocaleString()} deal${e.totalDeals === 1 ? "" : "s"} x ${_econRand(e.cost)}`;
     const cpqSub = `${e.qualified.toLocaleString()} qualified of ${e.totalDeals.toLocaleString()} deal${e.totalDeals === 1 ? "" : "s"}`;
 
     const sourceOpts = econChannels
@@ -137,8 +138,8 @@ window.VIEWS.pipeline = function (root, ctx) {
         <h3 style="margin:0 0 4px;">Lead economics</h3>
         <p class="section-caption" style="margin-top:0;">
           What a qualified lead costs us, per source, over the current sidebar date range and filters.
-          Total spend is leads x cost per lead and does not move when you change the qualified stages, only the
-          cost per qualified lead does.
+          Total spend is deals x cost per lead over the sidebar date range and does not move when you change the
+          qualified stages, only the cost per qualified lead does.
         </p>
 
         <div style="display:flex; gap:16px; flex-wrap:wrap; align-items:flex-end; margin:10px 0 14px;">
@@ -177,8 +178,14 @@ window.VIEWS.pipeline = function (root, ctx) {
             <div style="display:flex; flex-direction:column; gap:8px;">${costRows}</div>
           </div>
           <div style="flex:1 1 260px; min-width:240px;">
-            <div class="muted small" style="text-transform:uppercase; letter-spacing:0.04em; margin-bottom:8px;">
-              Stages that count as qualified
+            <div style="display:flex; align-items:baseline; justify-content:space-between; gap:8px; margin-bottom:8px;">
+              <div class="muted small" style="text-transform:uppercase; letter-spacing:0.04em;">
+                Stages that count as qualified
+              </div>
+              <div class="no-print" style="display:flex; gap:6px; flex:0 0 auto;">
+                <button type="button" id="econ-stage-all" style="font:inherit; font-size:12px; padding:3px 9px; border:1px solid var(--line); border-radius:6px; background:transparent; color:inherit; cursor:pointer;">Select all</button>
+                <button type="button" id="econ-stage-none" style="font:inherit; font-size:12px; padding:3px 9px; border:1px solid var(--line); border-radius:6px; background:transparent; color:inherit; cursor:pointer;">Clear</button>
+              </div>
             </div>
             <div style="display:grid; grid-template-columns:1fr 1fr; gap:4px 16px;">${stageRows}</div>
           </div>
@@ -195,8 +202,8 @@ window.VIEWS.pipeline = function (root, ctx) {
     set("econ-cpl",   e.cost == null ? dash : _econRand(e.cost));
     set("econ-cpq",   e.cpq  == null ? dash : _econRand(e.cpq));
     set("econ-spend-sub", e.cost == null
-      ? `${e.leads.toLocaleString()} lead${e.leads === 1 ? "" : "s"} · enter a cost per lead below`
-      : `${e.leads.toLocaleString()} lead${e.leads === 1 ? "" : "s"} x ${_econRand(e.cost)}`);
+      ? `${e.totalDeals.toLocaleString()} deal${e.totalDeals === 1 ? "" : "s"} · enter a cost per lead below`
+      : `${e.totalDeals.toLocaleString()} deal${e.totalDeals === 1 ? "" : "s"} x ${_econRand(e.cost)}`);
     set("econ-cpl-sub", __econState.source || "");
     set("econ-cpq-sub", `${e.qualified.toLocaleString()} qualified of ${e.totalDeals.toLocaleString()} deal${e.totalDeals === 1 ? "" : "s"}`);
   }
@@ -219,6 +226,19 @@ window.VIEWS.pipeline = function (root, ctx) {
         econRecalc();
       });
     });
+    // Bulk toggles for the qualified-stage box: set the whole set on/off, sync
+    // the visible checkboxes, then recalc (spend stays put, only CPQ moves).
+    const applyStageSet = (stages) => {
+      __econState.stages = new Set(stages);
+      root.querySelectorAll("[data-econ-stage]").forEach(cb => {
+        cb.checked = __econState.stages.has(cb.dataset.econStage);
+      });
+      econRecalc();
+    };
+    const allBtn = document.getElementById("econ-stage-all");
+    if (allBtn) allBtn.addEventListener("click", () => applyStageSet(econStages));
+    const noneBtn = document.getElementById("econ-stage-none");
+    if (noneBtn) noneBtn.addEventListener("click", () => applyStageSet([]));
   }
 
   // Funnel
@@ -309,7 +329,11 @@ window.VIEWS.pipeline = function (root, ctx) {
   }));
 
   root.innerHTML = `
-    <h2>Pipeline</h2>
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+      <h2 style="margin:0;">Pipeline</h2>
+      <button type="button" id="pipeline-export-pdf" class="btn-ghost no-print"
+              title="Export this pipeline view as a PDF for the management team">⬇ Export PDF</button>
+    </div>
     <p class="lede">How leads convert from inbound → qualified → deal → worked (call logged).</p>
 
     ${econPanelHtml()}
@@ -439,6 +463,12 @@ window.VIEWS.pipeline = function (root, ctx) {
   // Wire the lead economics panel (source pick, per-source cost inputs,
   // qualified-stage checkboxes). Toggles recalc figures live, no re-render.
   econWire();
+
+  // Export PDF — hands the current pipeline view to the browser's print dialog
+  // (Save as PDF) for the management team. The print stylesheet hides the app
+  // chrome (top nav, sidebar, interactive buttons) so only the report prints.
+  const pdfBtn = document.getElementById("pipeline-export-pdf");
+  if (pdfBtn) pdfBtn.addEventListener("click", () => window.print());
 
   // Meta panel — collapsed by default. Plotly must size against a visible
   // container, so render the Meta block lazily the first time it's opened.

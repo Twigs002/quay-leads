@@ -9,7 +9,7 @@ window.VIEWS = window.VIEWS || {};
 // resets them. All money is ZAR, R prefix, spaced thousands, rounded for
 // display only. No em or en dashes anywhere here.
 const __ECON_COST_LS = "quayLeads.leadEconCostPerLead.v1";
-let __econState = { source: null, stages: null };   // stages: Set, null = not built
+let __econState = { stages: null };   // stages: Set, null = not built (no source picker; the panel follows the sidebar source filter)
 
 function _econLoadCosts() {
   try {
@@ -22,10 +22,6 @@ function _econSaveCost(key, val) {
   if (val === null || val === "" || !Number.isFinite(val)) delete m[key];
   else m[key] = val;
   try { localStorage.setItem(__ECON_COST_LS, JSON.stringify(m)); } catch (_) {}
-}
-function _econCostOf(key) {
-  const v = _econLoadCosts()[key];
-  return Number.isFinite(v) ? v : null;
 }
 // "R13 840" style: R prefix, space thousands separator, no decimals.
 function _econRand(v) {
@@ -77,43 +73,46 @@ window.VIEWS.pipeline = function (root, ctx) {
   // Past Let - Leakage, Sold by Competitor) - see STAGES.isQualified. The
   // director can still tick those back on; the box just starts on the rule.
   if (__econState.stages === null) __econState.stages = new Set(econStages.filter(STAGES.isQualified));
-  if (!__econState.source || !econChannels.includes(__econState.source)) {
-    __econState.source = econChannels.includes("Meta / Facebook")
-      ? "Meta / Facebook" : (econChannels[0] || null);
+
+  // Pure calculation over the currently filtered leads, which already respect
+  // the sidebar source filter + date range (there is no source picker here -
+  // the panel follows the sidebar). Total spend sums each deal's OWN source
+  // cost per lead, so it is correct whether the view holds one source or many,
+  // and never depends on the checkboxes, so it stays put as stages are toggled;
+  // only qualified deals (the CPQ denominator) move with the stage box.
+  function econCompute(checked) {
+    const deals = leads.filter(l => l.has_deal);
+    const costs = _econLoadCosts();
+    let spend = 0, qualified = 0, costedDeals = 0;
+    for (const d of deals) {
+      const c = costs[_econChannel(d)];
+      if (Number.isFinite(c)) { spend += c; costedDeals++; }
+      if (checked.has(d.current_stage || "Unknown stage")) qualified++;
+    }
+    const hasCost = costedDeals > 0;
+    const cpl = hasCost ? spend / costedDeals : null;                        // blended R per costed deal across sources in view
+    const cpq = (!hasCost || qualified === 0) ? null : spend / qualified;    // divide raw, round only on display
+    return { totalDeals: deals.length, costedDeals, qualified, spend: hasCost ? spend : null, cpl, cpq };
   }
 
-  // Pure calculation for one channel + a set of checked (qualifying) stages,
-  // over the currently filtered leads (so it always matches the sidebar date
-  // range). Total spend uses the DEAL count (every deal that has come in for
-  // this channel in range) and never depends on the checkboxes, so it stays
-  // put as stages are toggled; only qualified deals (the CPQ denominator) move.
-  function econCompute(channel, checked) {
-    const inChannel = leads.filter(l => _econChannel(l) === channel);
-    const n = inChannel.length;
-    const deals = inChannel.filter(l => l.has_deal);
-    let qualified = 0;
-    for (const d of deals) if (checked.has(d.current_stage || "Unknown stage")) qualified++;
-    const cost = _econCostOf(channel);
-    const spend = cost == null ? null : deals.length * cost;
-    const cpq = (cost == null || qualified === 0) ? null : spend / qualified;   // divide raw, round only on display
-    return { leads: n, totalDeals: deals.length, qualified, cost, spend, cpq };
+  // Total-spend sub-caption: prompt for a cost when none is set, flag when only
+  // some deals in view have a costed source, else just the deal count in view.
+  function econSpendSub(e) {
+    if (e.spend == null) return `${e.totalDeals.toLocaleString()} deal${e.totalDeals === 1 ? "" : "s"} · enter a cost per lead below`;
+    if (e.costedDeals < e.totalDeals) return `${e.costedDeals.toLocaleString()} of ${e.totalDeals.toLocaleString()} deals costed`;
+    return `${e.totalDeals.toLocaleString()} deal${e.totalDeals === 1 ? "" : "s"} in view`;
   }
 
   function econPanelHtml() {
-    const ch = __econState.source;
-    const e = econCompute(ch, __econState.stages);
+    const e = econCompute(__econState.stages);
     const dash = "-";
-    const spendStr = e.cost == null ? dash : _econRand(e.spend);
-    const cplStr   = e.cost == null ? dash : _econRand(e.cost);
-    const cpqStr   = e.cpq  == null ? dash : _econRand(e.cpq);
-    const spendSub = e.cost == null
-      ? `${e.totalDeals.toLocaleString()} deal${e.totalDeals === 1 ? "" : "s"} · enter a cost per lead below`
-      : `${e.totalDeals.toLocaleString()} deal${e.totalDeals === 1 ? "" : "s"} x ${_econRand(e.cost)}`;
+    const spendStr = e.spend == null ? dash : _econRand(e.spend);
+    const cplStr   = e.cpl   == null ? dash : _econRand(e.cpl);
+    const cpqStr   = e.cpq   == null ? dash : _econRand(e.cpq);
+    const spendSub = econSpendSub(e);
+    const cplSub   = e.cpl == null ? "" : "blended across sources in view";
     const cpqSub = `${e.qualified.toLocaleString()} qualified of ${e.totalDeals.toLocaleString()} deal${e.totalDeals === 1 ? "" : "s"}`;
 
-    const sourceOpts = econChannels
-      .map(c => `<option value="${escapeAttr(c)}"${c === ch ? " selected" : ""}>${escapeHtml(c)}</option>`)
-      .join("");
     const costs = _econLoadCosts();
     const costRows = econChannels.map(c => {
       const cv = Number.isFinite(costs[c]) ? costs[c] : "";
@@ -137,20 +136,10 @@ window.VIEWS.pipeline = function (root, ctx) {
       <section class="card" style="padding:16px 20px;">
         <h3 style="margin:0 0 4px;">Lead economics</h3>
         <p class="section-caption" style="margin-top:0;">
-          What a qualified lead costs us, per source, over the current sidebar date range and filters.
-          Total spend is deals x cost per lead over the sidebar date range and does not move when you change the
+          What a qualified lead costs us over the current sidebar source, date range and filters.
+          Total spend is each deal x its source cost per lead and does not move when you change the
           qualified stages, only the cost per qualified lead does.
         </p>
-
-        <div style="display:flex; gap:16px; flex-wrap:wrap; align-items:flex-end; margin:10px 0 14px;">
-          <label style="flex:0 0 240px; min-width:220px;">
-            <div class="muted small" style="margin-bottom:4px;">Source</div>
-            <select id="econ-source" style="width:100%; padding:8px 10px; border:1px solid var(--line); border-radius:8px; font:inherit;">
-              ${sourceOpts}
-            </select>
-          </label>
-          <div class="muted small" style="padding-bottom:9px;">Date range and filters: set in the sidebar.</div>
-        </div>
 
         <div class="kpis" style="margin-top:4px;">
           <div class="kpi" style="border-left:4px solid var(--slate);">
@@ -161,7 +150,7 @@ window.VIEWS.pipeline = function (root, ctx) {
           <div class="kpi">
             <div class="label">Cost per lead</div>
             <div class="value" id="econ-cpl">${cplStr}</div>
-            <div class="delta-row muted small" id="econ-cpl-sub">${escapeHtml(ch || "")}</div>
+            <div class="delta-row muted small" id="econ-cpl-sub">${escapeHtml(cplSub)}</div>
           </div>
           <div class="kpi" style="border-left:4px solid var(--yellow);">
             <div class="label">Cost per qualified lead</div>
@@ -195,22 +184,18 @@ window.VIEWS.pipeline = function (root, ctx) {
   }
 
   function econRecalc() {
-    const e = econCompute(__econState.source, __econState.stages);
+    const e = econCompute(__econState.stages);
     const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
     const dash = "-";
-    set("econ-spend", e.cost == null ? dash : _econRand(e.spend));
-    set("econ-cpl",   e.cost == null ? dash : _econRand(e.cost));
-    set("econ-cpq",   e.cpq  == null ? dash : _econRand(e.cpq));
-    set("econ-spend-sub", e.cost == null
-      ? `${e.totalDeals.toLocaleString()} deal${e.totalDeals === 1 ? "" : "s"} · enter a cost per lead below`
-      : `${e.totalDeals.toLocaleString()} deal${e.totalDeals === 1 ? "" : "s"} x ${_econRand(e.cost)}`);
-    set("econ-cpl-sub", __econState.source || "");
+    set("econ-spend", e.spend == null ? dash : _econRand(e.spend));
+    set("econ-cpl",   e.cpl   == null ? dash : _econRand(e.cpl));
+    set("econ-cpq",   e.cpq   == null ? dash : _econRand(e.cpq));
+    set("econ-spend-sub", econSpendSub(e));
+    set("econ-cpl-sub", e.cpl == null ? "" : "blended across sources in view");
     set("econ-cpq-sub", `${e.qualified.toLocaleString()} qualified of ${e.totalDeals.toLocaleString()} deal${e.totalDeals === 1 ? "" : "s"}`);
   }
 
   function econWire() {
-    const sel = document.getElementById("econ-source");
-    if (sel) sel.addEventListener("change", () => { __econState.source = sel.value; econRecalc(); });
     root.querySelectorAll("[data-econ-cost]").forEach(inp => {
       inp.addEventListener("input", () => {
         const raw = inp.value.replace(/[^\d]/g, "");   // digits only; blank = cleared

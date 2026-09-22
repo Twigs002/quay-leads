@@ -121,6 +121,11 @@ window.VIEWS.overview = function (root, ctx) {
           <div class="delta-row muted small">${metaSoldCount ? `${metaSoldCount} sold &amp; paid · total agency commission` : "no Meta leads banked yet"}</div>
         </div>
       </div>
+      ${costPerQualified == null ? "" : `
+      <div id="cpql-gauge" style="height: 200px; margin-top: 8px;"></div>
+      <p class="section-caption" style="text-align:center; margin-top:-8px;">
+        Gauge shows cost per qualified lead; the marked line is the ${rand0(STAGES.QUALIFIED_TARGET_COST)} target.
+      </p>`}
       <p class="muted small" style="margin-top: 10px;">
         Counted as meta from source: ${metaSourceNames.length ? metaSourceNames.map(s => `<code>${escapeHtml(s)}</code>`).join(" ") : "<em>none matched — tell me the exact Meta source label</em>"}
       </p>
@@ -175,6 +180,33 @@ window.VIEWS.overview = function (root, ctx) {
       </section>
     </div>
   `;
+
+  // Cost-per-qualified gauge: value vs the R-target, drawn as a Plotly
+  // indicator. The threshold marker IS the target line — green fill/bar under
+  // target, red over. Only rendered when there's a value to show.
+  if (costPerQualified != null) {
+    const target = STAGES.QUALIFIED_TARGET_COST;
+    // Axis headroom so the needle/bar never clips: at least 1.5× target, and
+    // always a touch above the actual value when it blows past target.
+    const axisMax = Math.max(target * 1.5, costPerQualified * 1.1);
+    Plotly.newPlot("cpql-gauge", [{
+      type: "indicator",
+      mode: "gauge+number",
+      value: costPerQualified,
+      number: { prefix: "R", valueformat: ",.0f" },
+      gauge: {
+        axis: { range: [0, axisMax], tickprefix: "R", tickformat: ",.0f" },
+        bar: { color: overTarget ? "#B91C1C" : THEME.tokens.green },
+        borderwidth: 0,
+        steps: [
+          { range: [0, target], color: "rgba(47,143,99,0.14)" },
+          { range: [target, axisMax], color: "rgba(210,10,3,0.10)" },
+        ],
+        threshold: { line: { color: THEME.tokens.yellowDeep, width: 3 }, thickness: 0.9, value: target },
+      },
+    }], { ...THEME.PLOTLY_LAYOUT, margin: { l: 24, r: 24, t: 8, b: 8 }, height: 200 },
+       THEME.PLOTLY_CONFIG);
+  }
 
   // Total-volume sparkline on the first KPI card
   (() => {

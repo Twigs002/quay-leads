@@ -150,7 +150,10 @@
   <!-- Litepicker: dependency-free calendar range picker (auto-injects its own CSS) -->
   <script defer src="https://cdn.jsdelivr.net/npm/litepicker@2.0.12/dist/litepicker.js"></script>
   <!-- Plotly basic: bar, scatter, pie — all charts in this app use these. ~830 KB vs 3.5 MB. -->
-  <script defer src="https://cdn.plot.ly/plotly-basic-2.35.2.min.js"></script>
+  <!-- Full Plotly (not -basic): the -basic bundle omits the funnel and
+       indicator/gauge trace types this dashboard now uses. Larger download,
+       acceptable for an internal dashboard. -->
+  <script defer src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
 
   <!-- app — all deferred so HTML parse isn't blocked; execution order preserved -->
   <script defer src="config.js"></script>

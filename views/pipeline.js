@@ -153,6 +153,16 @@ window.VIEWS.pipeline = function (root, ctx) {
             <div class="value" id="econ-spend">${spendStr}</div>
             <div class="delta-row muted small" id="econ-spend-sub">${escapeHtml(spendSub)}</div>
           </div>
+          <div class="kpi" style="border-left:4px solid var(--blue);">
+            <div class="label">All leads received</div>
+            <div class="value">${leads.length.toLocaleString()}</div>
+            <div class="delta-row muted small">every lead in view</div>
+          </div>
+          <div class="kpi" style="border-left:4px solid var(--green);">
+            <div class="label">Qualifying / deals created</div>
+            <div class="value">${e.totalDeals.toLocaleString()}</div>
+            <div class="delta-row muted small">${leads.length ? Math.round(e.totalDeals / leads.length * 100) : 0}% of leads received</div>
+          </div>
           <div class="kpi">
             <div class="label">Cost per lead</div>
             <div class="value" id="econ-cpl">${cplStr}</div>

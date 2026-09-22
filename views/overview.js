@@ -2,7 +2,7 @@
 window.VIEWS = window.VIEWS || {};
 window.VIEWS.overview = function (root, ctx) {
   const leads = ctx.view.leads;
-  const { escapeHtml, pct, emptyState } = UTILS;
+  const { escapeHtml, escapeAttr, pct, emptyState, fmtShortDate, humanAgo } = UTILS;
 
   if (!leads.length) {
     root.innerHTML = `<h2>Overview</h2><p class="lede">Showing 0 leads.</p>${emptyState()}`;
@@ -67,6 +67,41 @@ window.VIEWS.overview = function (root, ctx) {
   const areaKnown = leads.some(l => l.in_farming_area != null);
   const outOfArea = leads.filter(l => l.out_of_area).length;
   const dealsInArea = leads.filter(l => l.has_deal && !l.out_of_area).length;
+
+  // ── Flag: seller leads inside our farming area with no HubSpot deal ──────
+  // These SHOULD have a deal but don't — a worklist for super/admin to chase.
+  // Strictly in-area (in_farming_area === true); unknown / unmapped suburbs are
+  // deliberately excluded so every flagged row is one we definitely farm.
+  // Sorted oldest-first: the longer it's sat dealless, the more urgent.
+  const flagged = leads
+    .filter(l => l.is_lead === "Seller Lead" && l.in_farming_area === true && !l.has_deal)
+    .sort((a, b) => (a.datestamp_d ? a.datestamp_d.getTime() : Infinity)
+                  - (b.datestamp_d ? b.datestamp_d.getTime() : Infinity));
+
+  const flagRow = (l) => `<tr>
+    <td>${escapeHtml(fmtShortDate(l.datestamp_d) || "—")}</td>
+    <td>${escapeHtml(l.client_name || "—")}</td>
+    <td>${escapeHtml(l.suburb || "—")}</td>
+    <td>${escapeHtml(l.source || "—")}</td>
+    <td>${escapeHtml(l.division || "—")}</td>
+    <td>${escapeHtml(l.phone || "")}${l.phone && l.email ? " · " : ""}${escapeHtml(l.email || "")}</td>
+    <td>${l.datestamp_d ? escapeHtml(humanAgo(l.datestamp_d)) : "—"}</td>
+  </tr>`;
+
+  // CSV of the flagged worklist. Self-contained (mirrors raw_data's csvCell) so
+  // the export can't be broken by a leading =/+/-/@ formula-injection cell.
+  function flaggedCSV() {
+    const cols = ["datestamp", "client_name", "suburb", "source", "division", "phone", "email", "is_lead"];
+    const cell = (v) => {
+      if (v === null || v === undefined) return "";
+      let s = String(v);
+      if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const rows = flagged.map(l => ({ ...l, datestamp: fmtShortDate(l.datestamp_d) }));
+    const body = rows.map(r => cols.map(c => cell(r[c])).join(",")).join("\n");
+    return cols.join(",") + "\n" + body;
+  }
 
   function deltaPill(curr, prev) {
     if (!prev) return "";
@@ -167,14 +202,60 @@ window.VIEWS.overview = function (root, ctx) {
       </section>
       <section class="card">
         <h3>Needs attention</h3>
-        <p class="muted">Unworked leads with no HubSpot deal.</p>
-        <div class="kpi" style="margin-top: 12px;">
-          <div class="label">Backlog</div>
-          <div class="value">${leads.filter(l => !l.has_deal && !l.worked).length.toLocaleString()}</div>
+        <p class="section-caption">
+          <strong>Flagged</strong> = seller leads inside our farming area with no HubSpot deal —
+          they should have a deal but don't. <em>Backlog</em> = any lead with no deal that was never worked.
+        </p>
+        <div class="kpis" style="margin-top: 4px;">
+          <div class="kpi" style="border-left:4px solid ${flagged.length ? "#B91C1C" : THEME.tokens.green};">
+            <div class="label">Flagged · seller, in-area, no deal</div>
+            <div class="value">${flagged.length.toLocaleString()}</div>
+            <div class="delta-row muted small">${flagged.length ? "review &amp; action below" : "nothing flagged 🎉"}</div>
+          </div>
+          ${kpiCard("Backlog · no deal, never worked", leads.filter(l => !l.has_deal && !l.worked).length)}
         </div>
+        ${flagged.length ? `
+        <div style="margin-top: 12px; display:flex; gap:8px; flex-wrap:wrap;">
+          <button id="flag-review-btn" class="btn-ghost" style="padding: 4px 12px;" aria-expanded="false" aria-controls="flag-table-wrap">Review ${flagged.length} flagged ▾</button>
+          <button id="flag-csv-btn" class="btn-ghost" style="padding: 4px 12px;">⬇ CSV</button>
+        </div>
+        <div id="flag-table-wrap" class="table-wrap" hidden style="margin-top: 12px; max-height: 45vh; overflow:auto;">
+          <table class="dt">
+            <thead><tr>
+              <th>Received</th><th>Name</th><th>Suburb</th><th>Source</th><th>Team</th><th>Contact</th><th>Waiting</th>
+            </tr></thead>
+            <tbody>${flagged.map(flagRow).join("")}</tbody>
+          </table>
+        </div>` : ""}
       </section>
     </div>
   `;
+
+  // Flag worklist: expand/collapse the table + CSV export. Guarded — the
+  // controls only exist when flagged.length > 0.
+  (() => {
+    const $btn = document.getElementById("flag-review-btn");
+    const $wrap = document.getElementById("flag-table-wrap");
+    if ($btn && $wrap) {
+      $btn.addEventListener("click", () => {
+        const open = $wrap.hidden;
+        $wrap.hidden = !open;
+        $btn.setAttribute("aria-expanded", String(open));
+        $btn.textContent = `Review ${flagged.length} flagged ${open ? "▴" : "▾"}`;
+      });
+    }
+    const $csv = document.getElementById("flag-csv-btn");
+    if ($csv) {
+      $csv.addEventListener("click", () => {
+        const blob = new Blob([flaggedCSV()], { type: "text/csv" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url; a.download = "quay_flagged_seller_no_deal.csv";
+        document.body.appendChild(a); a.click(); a.remove();
+        URL.revokeObjectURL(url);
+      });
+    }
+  })();
 
   // Total-volume sparkline on the first KPI card
   (() => {

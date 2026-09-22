@@ -89,22 +89,44 @@ window.VIEWS.pipeline = function (root, ctx) {
   function econCompute(checked) {
     const deals = leads.filter(l => l.has_deal);
     const costs = _econLoadCosts();
-    let spend = 0, qualified = 0, costedDeals = 0;
+    // Spend across ALL leads received (each lead x its own source cost per lead):
+    // what we actually paid to acquire the leads. Deal-spend is the subset that
+    // went to leads which became HubSpot deals.
+    let spendAll = 0, costedLeads = 0;
+    for (const l of leads) {
+      const c = costs[_econChannel(l)];
+      if (Number.isFinite(c)) { spendAll += c; costedLeads++; }
+    }
+    let spendDeals = 0, qualified = 0, costedDeals = 0;
     for (const d of deals) {
       const c = costs[_econChannel(d)];
-      if (Number.isFinite(c)) { spend += c; costedDeals++; }
+      if (Number.isFinite(c)) { spendDeals += c; costedDeals++; }
       if (checked.has(d.current_stage || "Unknown stage")) qualified++;
     }
-    const hasCost = costedDeals > 0;
-    const cpl = hasCost ? spend / costedDeals : null;                        // blended R per costed deal across sources in view
-    const cpq = (!hasCost || qualified === 0) ? null : spend / qualified;    // divide raw, round only on display
-    return { totalDeals: deals.length, costedDeals, qualified, spend: hasCost ? spend : null, cpl, cpq };
+    const hasCost = costedLeads > 0;
+    // Every cost-per figure divides the full acquisition spend (all leads) by the
+    // relevant count. Divide raw, round only on display.
+    const cpl = hasCost ? spendAll / costedLeads : null;                          // blended R per lead across sources in view
+    const cpd = (!hasCost || deals.length === 0) ? null : spendAll / deals.length; // R per deal created
+    const cpq = (!hasCost || qualified === 0)   ? null : spendAll / qualified;     // R per qualified deal
+    return {
+      totalLeads: leads.length, totalDeals: deals.length,
+      costedLeads, costedDeals, qualified,
+      spendAll:   hasCost ? spendAll : null,
+      spendDeals: costedDeals > 0 ? spendDeals : null,
+      cpl, cpd, cpq,
+    };
   }
 
-  // Total-spend sub-caption: prompt for a cost when none is set, flag when only
-  // some deals in view have a costed source, else just the deal count in view.
-  function econSpendSub(e) {
-    if (e.spend == null) return `${e.totalDeals.toLocaleString()} deal${e.totalDeals === 1 ? "" : "s"} · enter a cost per lead below`;
+  // Total-spend sub-captions: prompt for a cost when none is set, flag when only
+  // some rows in view have a costed source, else just the count in view.
+  function econSpendAllSub(e) {
+    if (e.spendAll == null) return `${e.totalLeads.toLocaleString()} lead${e.totalLeads === 1 ? "" : "s"} · enter a cost per lead below`;
+    if (e.costedLeads < e.totalLeads) return `${e.costedLeads.toLocaleString()} of ${e.totalLeads.toLocaleString()} leads costed`;
+    return `${e.totalLeads.toLocaleString()} lead${e.totalLeads === 1 ? "" : "s"} received`;
+  }
+  function econSpendDealsSub(e) {
+    if (e.spendDeals == null) return `${e.totalDeals.toLocaleString()} deal${e.totalDeals === 1 ? "" : "s"} · enter a cost per lead below`;
     if (e.costedDeals < e.totalDeals) return `${e.costedDeals.toLocaleString()} of ${e.totalDeals.toLocaleString()} deals costed`;
     return `${e.totalDeals.toLocaleString()} deal${e.totalDeals === 1 ? "" : "s"} in view`;
   }
@@ -112,11 +134,15 @@ window.VIEWS.pipeline = function (root, ctx) {
   function econPanelHtml() {
     const e = econCompute(__econState.stages);
     const dash = "-";
-    const spendStr = e.spend == null ? dash : _econRand(e.spend);
-    const cplStr   = e.cpl   == null ? dash : _econRand(e.cpl);
-    const cpqStr   = e.cpq   == null ? dash : _econRand(e.cpq);
-    const spendSub = econSpendSub(e);
-    const cplSub   = e.cpl == null ? "" : "blended across sources in view";
+    const spendAllStr   = e.spendAll   == null ? dash : _econRand(e.spendAll);
+    const spendDealsStr = e.spendDeals == null ? dash : _econRand(e.spendDeals);
+    const cplStr   = e.cpl == null ? dash : _econRand(e.cpl);
+    const cpdStr   = e.cpd == null ? dash : _econRand(e.cpd);
+    const cpqStr   = e.cpq == null ? dash : _econRand(e.cpq);
+    const spendAllSub   = econSpendAllSub(e);
+    const spendDealsSub = econSpendDealsSub(e);
+    const cplSub = e.cpl == null ? "" : "blended across sources in view";
+    const cpdSub = `${e.totalDeals.toLocaleString()} deal${e.totalDeals === 1 ? "" : "s"} created`;
     const cpqSub = `${e.qualified.toLocaleString()} qualified of ${e.totalDeals.toLocaleString()} deal${e.totalDeals === 1 ? "" : "s"}`;
 
     const costs = _econLoadCosts();
@@ -142,31 +168,33 @@ window.VIEWS.pipeline = function (root, ctx) {
       <section class="card" style="padding:16px 20px;">
         <h3 style="margin:0 0 4px;">Lead economics</h3>
         <p class="section-caption" style="margin-top:0;">
-          What a qualified lead costs us over the current sidebar source, date range and filters.
-          Total spend is each deal x its source cost per lead and does not move when you change the
-          qualified stages, only the cost per qualified lead does.
+          What our leads cost us over the current sidebar source, date range and filters.
+          Total spend (all leads) is each lead x its source cost per lead; total spend (deals) is the
+          subset spent on leads that became HubSpot deals. Cost per lead, per deal and per qualified
+          lead all divide the all-leads spend by the leads, deals and qualified deals in view. Spend
+          does not move when you change the qualified stages, only the cost per qualified lead does.
         </p>
 
         <div class="kpis" style="margin-top:4px;">
           <div class="kpi" style="border-left:4px solid var(--slate);">
-            <div class="label">Total spend</div>
-            <div class="value" id="econ-spend">${spendStr}</div>
-            <div class="delta-row muted small" id="econ-spend-sub">${escapeHtml(spendSub)}</div>
+            <div class="label">Total spend (all leads)</div>
+            <div class="value" id="econ-spend-all">${spendAllStr}</div>
+            <div class="delta-row muted small" id="econ-spend-all-sub">${escapeHtml(spendAllSub)}</div>
           </div>
           <div class="kpi" style="border-left:4px solid var(--blue);">
-            <div class="label">All leads received</div>
-            <div class="value">${leads.length.toLocaleString()}</div>
-            <div class="delta-row muted small">every lead in view</div>
-          </div>
-          <div class="kpi" style="border-left:4px solid var(--green);">
-            <div class="label">Qualifying / deals created</div>
-            <div class="value">${e.totalDeals.toLocaleString()}</div>
-            <div class="delta-row muted small">${leads.length ? Math.round(e.totalDeals / leads.length * 100) : 0}% of leads received</div>
+            <div class="label">Total spend (deals)</div>
+            <div class="value" id="econ-spend-deals">${spendDealsStr}</div>
+            <div class="delta-row muted small" id="econ-spend-deals-sub">${escapeHtml(spendDealsSub)}</div>
           </div>
           <div class="kpi">
             <div class="label">Cost per lead</div>
             <div class="value" id="econ-cpl">${cplStr}</div>
             <div class="delta-row muted small" id="econ-cpl-sub">${escapeHtml(cplSub)}</div>
+          </div>
+          <div class="kpi" style="border-left:4px solid var(--green);">
+            <div class="label">Cost per deal</div>
+            <div class="value" id="econ-cpd">${cpdStr}</div>
+            <div class="delta-row muted small" id="econ-cpd-sub">${escapeHtml(cpdSub)}</div>
           </div>
           <div class="kpi" style="border-left:4px solid var(--yellow);">
             <div class="label">Cost per qualified lead</div>
@@ -203,11 +231,15 @@ window.VIEWS.pipeline = function (root, ctx) {
     const e = econCompute(__econState.stages);
     const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
     const dash = "-";
-    set("econ-spend", e.spend == null ? dash : _econRand(e.spend));
-    set("econ-cpl",   e.cpl   == null ? dash : _econRand(e.cpl));
-    set("econ-cpq",   e.cpq   == null ? dash : _econRand(e.cpq));
-    set("econ-spend-sub", econSpendSub(e));
+    set("econ-spend-all",   e.spendAll   == null ? dash : _econRand(e.spendAll));
+    set("econ-spend-deals", e.spendDeals == null ? dash : _econRand(e.spendDeals));
+    set("econ-cpl", e.cpl == null ? dash : _econRand(e.cpl));
+    set("econ-cpd", e.cpd == null ? dash : _econRand(e.cpd));
+    set("econ-cpq", e.cpq == null ? dash : _econRand(e.cpq));
+    set("econ-spend-all-sub", econSpendAllSub(e));
+    set("econ-spend-deals-sub", econSpendDealsSub(e));
     set("econ-cpl-sub", e.cpl == null ? "" : "blended across sources in view");
+    set("econ-cpd-sub", `${e.totalDeals.toLocaleString()} deal${e.totalDeals === 1 ? "" : "s"} created`);
     set("econ-cpq-sub", `${e.qualified.toLocaleString()} qualified of ${e.totalDeals.toLocaleString()} deal${e.totalDeals === 1 ? "" : "s"}`);
   }
 

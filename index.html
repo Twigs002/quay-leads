@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&family=Permanent+Marker&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles.css?v=20260923-1">
   <!-- Shared Quay 1 app switcher (superuser-only dropdown on the flag) -->
   <script src="https://twigs002.github.io/quay-dashboard-v2/quay-nav.js" defer></script>
 </head>
@@ -152,24 +152,28 @@
   <!-- Plotly basic: bar, scatter, pie — all charts in this app use these. ~830 KB vs 3.5 MB. -->
   <script defer src="https://cdn.plot.ly/plotly-basic-2.35.2.min.js"></script>
 
-  <!-- app — all deferred so HTML parse isn't blocked; execution order preserved -->
-  <script defer src="config.js"></script>
-  <script defer src="utils.js"></script>
-  <script defer src="theme.js"></script>
-  <script defer src="stages.js"></script>
-  <script defer src="suburb_sales.js"></script>
-  <script defer src="data.js"></script>
-  <script defer src="filters.js"></script>
-  <script defer src="views/overview.js"></script>
-  <script defer src="views/sources.js"></script>
+  <!-- app — all deferred so HTML parse isn't blocked; execution order preserved.
+       CACHE-BUST: every local asset above and below carries ?v=<version>. GitHub
+       Pages caches static files for 10 min, so after a deploy browsers can serve
+       stale JS/CSS. BUMP the ?v= value (styles.css + every script here) on every
+       release so browsers fetch the new files immediately instead of the cache. -->
+  <script defer src="config.js?v=20260923-1"></script>
+  <script defer src="utils.js?v=20260923-1"></script>
+  <script defer src="theme.js?v=20260923-1"></script>
+  <script defer src="stages.js?v=20260923-1"></script>
+  <script defer src="suburb_sales.js?v=20260923-1"></script>
+  <script defer src="data.js?v=20260923-1"></script>
+  <script defer src="filters.js?v=20260923-1"></script>
+  <script defer src="views/overview.js?v=20260923-1"></script>
+  <script defer src="views/sources.js?v=20260923-1"></script>
   <!-- meta_report.js exposes window.renderMetaBlock, used by the Pipeline view;
        it must load before pipeline.js. It no longer registers its own tab. -->
-  <script defer src="views/meta_report.js"></script>
-  <script defer src="views/pipeline.js"></script>
-  <script defer src="views/lead_economics.js"></script>
-  <script defer src="views/track.js"></script>
-  <script defer src="views/reassignment.js"></script>
-  <script defer src="views/raw_data.js"></script>
-  <script defer src="app.js"></script>
+  <script defer src="views/meta_report.js?v=20260923-1"></script>
+  <script defer src="views/pipeline.js?v=20260923-1"></script>
+  <script defer src="views/lead_economics.js?v=20260923-1"></script>
+  <script defer src="views/track.js?v=20260923-1"></script>
+  <script defer src="views/reassignment.js?v=20260923-1"></script>
+  <script defer src="views/raw_data.js?v=20260923-1"></script>
+  <script defer src="app.js?v=20260923-1"></script>
 </body>
 </html>

@@ -30,12 +30,15 @@ function _econRand(v) {
   const s = Math.abs(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ");
   return "R" + (n < 0 ? "-" + s : s);
 }
-// Which paid channel a lead belongs to. Same taxonomy the Lead economics view
-// uses (originFor): the calling pipe (auto) is Dialfire, a Meta / Facebook / fb
-// source is Meta, everything else is the Seller Lead Bank sheet book.
+// Which paid channel a lead belongs to, by ACQUISITION SOURCE. A Meta / Facebook
+// / fb source is Meta - what we paid to acquire the lead - regardless of who
+// later created the HubSpot deal (the Dialfire -> n8n pipe often auto-creates the
+// deal for a Meta lead, but we still paid Meta to get the lead). Only a lead that
+// is NOT a Meta source and whose deal was auto-created belongs to the Dialfire
+// calling pipe; everything else is the Seller Lead Bank sheet book.
 function _econChannel(l) {
-  if (l && l.deal_creation === "auto") return "Dialfire";
   if (l && STAGES.isMetaSource(l.source)) return "Meta / Facebook";
+  if (l && l.deal_creation === "auto") return "Dialfire";
   return "Seller Lead Bank";
 }
 window.VIEWS.pipeline = function (root, ctx) {
@@ -85,7 +88,7 @@ window.VIEWS.pipeline = function (root, ctx) {
   // the panel follows the sidebar). Total spend sums each deal's OWN source
   // cost per lead, so it is correct whether the view holds one source or many,
   // and never depends on the checkboxes, so it stays put as stages are toggled;
-  // only qualified deals (the CPQ denominator) move with the stage box.
+  // only the cost-per-deal denominator (selected deals) moves with the stage box.
   function econCompute(checked) {
     const deals = leads.filter(l => l.has_deal);
     const costs = _econLoadCosts();
@@ -97,24 +100,25 @@ window.VIEWS.pipeline = function (root, ctx) {
       const c = costs[_econChannel(l)];
       if (Number.isFinite(c)) { spendAll += c; costedLeads++; }
     }
-    let spendDeals = 0, qualified = 0, costedDeals = 0;
+    let spendDeals = 0, selectedDeals = 0, costedDeals = 0;
     for (const d of deals) {
       const c = costs[_econChannel(d)];
       if (Number.isFinite(c)) { spendDeals += c; costedDeals++; }
-      if (checked.has(d.current_stage || "Unknown stage")) qualified++;
+      if (checked.has(d.current_stage || "Unknown stage")) selectedDeals++;
     }
     const hasCost = costedLeads > 0;
-    // Every cost-per figure divides the full acquisition spend (all leads) by the
-    // relevant count. Divide raw, round only on display.
-    const cpl = hasCost ? spendAll / costedLeads : null;                          // blended R per lead across sources in view
-    const cpd = (!hasCost || deals.length === 0) ? null : spendAll / deals.length; // R per deal created
-    const cpq = (!hasCost || qualified === 0)   ? null : spendAll / qualified;     // R per qualified deal
+    // Both cost-per figures divide the full acquisition spend (all leads). Cost
+    // per lead spreads it over the leads; cost per deal spreads it over the deals
+    // in the selected stages, so it moves as the director picks stages. Divide
+    // raw, round only on display.
+    const cpl = hasCost ? spendAll / costedLeads : null;                            // blended R per lead across sources in view
+    const cpd = (!hasCost || selectedDeals === 0) ? null : spendAll / selectedDeals; // R per deal in the selected stages
     return {
       totalLeads: leads.length, totalDeals: deals.length,
-      costedLeads, costedDeals, qualified,
+      costedLeads, costedDeals, selectedDeals,
       spendAll:   hasCost ? spendAll : null,
       spendDeals: costedDeals > 0 ? spendDeals : null,
-      cpl, cpd, cpq,
+      cpl, cpd,
     };
   }
 
@@ -130,6 +134,12 @@ window.VIEWS.pipeline = function (root, ctx) {
     if (e.costedDeals < e.totalDeals) return `${e.costedDeals.toLocaleString()} of ${e.totalDeals.toLocaleString()} deals costed`;
     return `${e.totalDeals.toLocaleString()} deal${e.totalDeals === 1 ? "" : "s"} in view`;
   }
+  // Cost-per-deal sub-caption: flag how many of the deals in view sit in the
+  // selected stages (the denominator), else just the count in view.
+  function econCpdSub(e) {
+    if (e.selectedDeals < e.totalDeals) return `${e.selectedDeals.toLocaleString()} of ${e.totalDeals.toLocaleString()} deal${e.totalDeals === 1 ? "" : "s"} selected`;
+    return `${e.totalDeals.toLocaleString()} deal${e.totalDeals === 1 ? "" : "s"} in view`;
+  }
 
   function econPanelHtml() {
     const e = econCompute(__econState.stages);
@@ -138,12 +148,10 @@ window.VIEWS.pipeline = function (root, ctx) {
     const spendDealsStr = e.spendDeals == null ? dash : _econRand(e.spendDeals);
     const cplStr   = e.cpl == null ? dash : _econRand(e.cpl);
     const cpdStr   = e.cpd == null ? dash : _econRand(e.cpd);
-    const cpqStr   = e.cpq == null ? dash : _econRand(e.cpq);
     const spendAllSub   = econSpendAllSub(e);
     const spendDealsSub = econSpendDealsSub(e);
     const cplSub = e.cpl == null ? "" : "blended across sources in view";
-    const cpdSub = `${e.totalDeals.toLocaleString()} deal${e.totalDeals === 1 ? "" : "s"} created`;
-    const cpqSub = `${e.qualified.toLocaleString()} qualified of ${e.totalDeals.toLocaleString()} deal${e.totalDeals === 1 ? "" : "s"}`;
+    const cpdSub = econCpdSub(e);
 
     const costs = _econLoadCosts();
     const costRows = econChannels.map(c => {
@@ -170,9 +178,9 @@ window.VIEWS.pipeline = function (root, ctx) {
         <p class="section-caption" style="margin-top:0;">
           What our leads cost us over the current sidebar source, date range and filters.
           Total spend (all leads) is each lead x its source cost per lead; total spend (deals) is the
-          subset spent on leads that became HubSpot deals. Cost per lead, per deal and per qualified
-          lead all divide the all-leads spend by the leads, deals and qualified deals in view. Spend
-          does not move when you change the qualified stages, only the cost per qualified lead does.
+          subset spent on leads that became HubSpot deals. Cost per lead and cost per deal both divide
+          the all-leads spend, by the leads in view and by the deals in the selected stages. Spend does
+          not move when you change the stage selection, only the cost per deal does.
         </p>
 
         <div class="kpis" style="margin-top:4px;">
@@ -196,11 +204,6 @@ window.VIEWS.pipeline = function (root, ctx) {
             <div class="value" id="econ-cpd">${cpdStr}</div>
             <div class="delta-row muted small" id="econ-cpd-sub">${escapeHtml(cpdSub)}</div>
           </div>
-          <div class="kpi" style="border-left:4px solid var(--yellow);">
-            <div class="label">Cost per qualified lead</div>
-            <div class="value" id="econ-cpq">${cpqStr}</div>
-            <div class="delta-row muted small" id="econ-cpq-sub">${escapeHtml(cpqSub)}</div>
-          </div>
         </div>
 
         <div style="display:flex; gap:28px; flex-wrap:wrap; margin-top:18px;">
@@ -213,7 +216,7 @@ window.VIEWS.pipeline = function (root, ctx) {
           <div style="flex:1 1 260px; min-width:240px;">
             <div style="display:flex; align-items:baseline; justify-content:space-between; gap:8px; margin-bottom:8px;">
               <div class="muted small" style="text-transform:uppercase; letter-spacing:0.04em;">
-                Stages that count as qualified
+                Stages that count toward cost per deal
               </div>
               <div class="no-print" style="display:flex; gap:6px; flex:0 0 auto;">
                 <button type="button" id="econ-stage-all" style="font:inherit; font-size:12px; padding:3px 9px; border:1px solid var(--line); border-radius:6px; background:transparent; color:inherit; cursor:pointer;">Select all</button>
@@ -235,12 +238,10 @@ window.VIEWS.pipeline = function (root, ctx) {
     set("econ-spend-deals", e.spendDeals == null ? dash : _econRand(e.spendDeals));
     set("econ-cpl", e.cpl == null ? dash : _econRand(e.cpl));
     set("econ-cpd", e.cpd == null ? dash : _econRand(e.cpd));
-    set("econ-cpq", e.cpq == null ? dash : _econRand(e.cpq));
     set("econ-spend-all-sub", econSpendAllSub(e));
     set("econ-spend-deals-sub", econSpendDealsSub(e));
     set("econ-cpl-sub", e.cpl == null ? "" : "blended across sources in view");
-    set("econ-cpd-sub", `${e.totalDeals.toLocaleString()} deal${e.totalDeals === 1 ? "" : "s"} created`);
-    set("econ-cpq-sub", `${e.qualified.toLocaleString()} qualified of ${e.totalDeals.toLocaleString()} deal${e.totalDeals === 1 ? "" : "s"}`);
+    set("econ-cpd-sub", econCpdSub(e));
   }
 
   function econWire() {

@@ -76,7 +76,20 @@ window.STAGES = (() => {
   // cover overheads and the broker split, but the dashboard reports the full
   // agency figure. Real per-suburb banked commission (suburb row avg_comm) is
   // used in preference to this rate wherever a suburb is mapped.
-  const COMMISSION_RATE = 0.042;    // total agency commission (measured)
+  const COMMISSION_RATE = 0.042;    // total agency commission (measured, historic)
+
+  // Projected commission model (director-owned assumptions, used where we have no
+  // banked register figure): the agency fee on a sale is 4% of the sale price,
+  // plus 15% VAT on that fee, so gross commission = price x 4% x 1.15 = 4.60% of
+  // the price. Quay 1 keeps QUAY1_SHARE of that gross after the broker split /
+  // overheads. These drive the "expected / average commission" layer only - the
+  // HARD ROI still uses real banked commission from the register.
+  const COMM_FEE_RATE = 0.04;              // agency fee, % of sale price
+  const VAT_RATE      = 0.15;              // VAT on the fee
+  const COMM_GROSS_RATE = COMM_FEE_RATE * (1 + VAT_RATE);  // 0.046 of sale price
+  const QUAY1_SHARE   = 0.50;              // Quay 1's retained share of gross comm
+  const grossComm = (price) => (Number(price) || 0) * COMM_GROSS_RATE;   // 4% + VAT
+  const quay1Net  = (price) => grossComm(price) * QUAY1_SHARE;           // Quay 1 keep
 
   // Outbound calling (Dialfire) monthly running cost. Two assumptions the user
   // owns (adjust here and every view follows): the caller team's salaries, and
@@ -124,6 +137,7 @@ window.STAGES = (() => {
   return {
     ORDER, NOT_QUALIFIED, HIDDEN, WON, LOST, NURTURE, OUT_OF_AREA, MANDATE, COMPETITOR_LOST,
     META_SOURCE_RE, META_COST_PER_LEAD, QUALIFIED_TARGET_COST, COMMISSION_RATE,
+    COMM_FEE_RATE, VAT_RATE, COMM_GROSS_RATE, QUAY1_SHARE, grossComm, quay1Net,
     CALLER_SALARIES_MONTHLY, CALLING_COST_MONTHLY, DIALFIRE_MONTHLY_COST,
     DIALFIRE_LEADS_PER_MONTH_FALLBACK,
     orderIndex, isQualified, isHidden, isMetaSource, canonicalSource, isMandate, isWonListing, isLost,

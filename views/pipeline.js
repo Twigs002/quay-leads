@@ -251,6 +251,7 @@ window.VIEWS.pipeline = function (root, ctx) {
         if (raw !== inp.value) inp.value = raw;
         _econSaveCost(inp.dataset.econCost, raw === "" ? null : Number(raw));
         econRecalc();
+        drawRoi();          // spend (and so ROI) depends on the per-lead cost
       });
     });
     root.querySelectorAll("[data-econ-stage]").forEach(cb => {
@@ -258,6 +259,7 @@ window.VIEWS.pipeline = function (root, ctx) {
         const st = cb.dataset.econStage;
         if (cb.checked) __econState.stages.add(st); else __econState.stages.delete(st);
         econRecalc();
+        redrawStageDriven();   // funnel + stage bar follow the picked stages
       });
     });
     // Bulk toggles for the qualified-stage box: set the whole set on/off, sync
@@ -268,6 +270,7 @@ window.VIEWS.pipeline = function (root, ctx) {
         cb.checked = __econState.stages.has(cb.dataset.econStage);
       });
       econRecalc();
+      redrawStageDriven();
     };
     const allBtn = document.getElementById("econ-stage-all");
     if (allBtn) allBtn.addEventListener("click", () => applyStageSet(econStages));
@@ -275,12 +278,10 @@ window.VIEWS.pipeline = function (root, ctx) {
     if (noneBtn) noneBtn.addEventListener("click", () => applyStageSet([]));
   }
 
-  // Funnel
+  // Funnel — top of funnel is all leads in view; deal/qualified/worked steps are
+  // computed in drawFunnel() so they follow the picked stages.
   const nLeads = leads.length;
-  const QUAL = new Set(["Seller Lead", "Owner", "Buyer Lead", "Rental Lead"]);
-  const nQualified = leads.filter(l => QUAL.has(l.is_lead)).length;
   const nDeal = leads.filter(l => l.has_deal).length;
-  const nWorked = leads.filter(l => l.worked).length;
 
   // Live stage bar — ordered to match the HubSpot pipeline (chronological),
   // not by volume, so it reads exactly like HubSpot. Each bar also carries
@@ -311,6 +312,32 @@ window.VIEWS.pipeline = function (root, ctx) {
   const totalSold = soldUs.length + soldComp.length;
   const winRate   = totalSold ? (soldUs.length / totalSold * 100) : 0;
   const randMoney = v => v ? "R" + v.toLocaleString(undefined, { maximumFractionDigits: 0 }) : "R0";
+  // Projected commission on our own sales (4% fee + 15% VAT of sale price;
+  // Quay 1 keeps 50%). Assumption layer, kept separate from banked ROI below.
+  const soldUsQuayNet = STAGES.quay1Net(soldUsVal);   // Quay 1's projected keep
+
+  // ── HARD ROI: banked commission vs acquisition spend, per channel ───────────
+  // Banked = paid-out register rows traced to a lead (real money). Spend uses the
+  // same per-lead costs the director types into the panel above. Scoped to the
+  // leads in the current filter, so it moves with the sidebar (a cohort ROI).
+  const salesReg = (ctx.cache && ctx.cache.salesDeals) || [];
+  const saleByDeal = new Map();
+  for (const s of salesReg) {
+    if (!s.matched_deal_id) continue;
+    const k = String(s.matched_deal_id);
+    const prev = saleByDeal.get(k);
+    if (!prev || (s.deal_status === "PAID_OUT" && prev.deal_status !== "PAID_OUT")) saleByDeal.set(k, s);
+  }
+  const roiAgg = {};
+  for (const c of econChannels) roiAgg[c] = { leads: 0, deals: 0, bankedSales: 0, banked: 0 };
+  for (const l of leads) {
+    const a = roiAgg[_econChannel(l)];
+    if (!a) continue;
+    a.leads++;
+    if (l.has_deal) a.deals++;
+    const sale = l.deal_id ? saleByDeal.get(String(l.deal_id)) : null;
+    if (sale && sale.deal_status === "PAID_OUT") { a.bankedSales++; a.banked += Number(sale.total_gross_comm) || 0; }
+  }
 
   // Deal creation source (Option B): auto = the Dialfire→n8n pipe
   // (HubSpot record source n8n.cloud / INTEGRATION), manual = CRM UI. Backfilled
@@ -372,6 +399,16 @@ window.VIEWS.pipeline = function (root, ctx) {
 
     ${econPanelHtml()}
 
+    <section class="card">
+      <h3>Return on investment</h3>
+      <p class="section-caption">
+        <strong>HARD ROI</strong> = banked commission (paid-out sales in the register that trace back to a lead) &divide; what we paid to
+        acquire that channel's leads, using the per-lead costs set above. Real money only, no projections. Scoped to the leads in the
+        current filter. Recent periods read low because sales bank months after the lead arrives.
+      </p>
+      <div id="roi-block"></div>
+    </section>
+
     <details class="card" id="meta-panel" style="padding: 0; margin-top:16px;">
       <summary style="cursor:pointer; list-style:none; padding:14px 16px; font-weight:700; display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
         <span style="display:inline-flex; gap:3px;">
@@ -386,12 +423,13 @@ window.VIEWS.pipeline = function (root, ctx) {
 
     <section class="card">
       <h3>Conversion funnel</h3>
+      <p class="section-caption">Leads received &rarr; deal created &rarr; <strong>qualified</strong> &rarr; worked. The qualified and worked steps count deals in the <strong>stages ticked above</strong> (&ldquo;Stages that count as qualified&rdquo;), so tick/untick to see the funnel change. Percentages are of leads received.</p>
       <div id="funnel-chart" style="height: 380px;"></div>
     </section>
 
     <section class="card">
       <h3>Where the deals are on HubSpot</h3>
-      <p class="section-caption">Live deal stage from HubSpot, in pipeline order. Each bar shows the deal count and the stage's average <strong>win probability %</strong>. Refreshed every 30 min by the sync job. <strong>Click a bar</strong> to list that stage's deals with a link straight to each one in HubSpot.</p>
+      <p class="section-caption">Live deal stage from HubSpot, in pipeline order. Each bar shows the deal count and the stage's average <strong>win probability %</strong>. Shows only the <strong>stages ticked above</strong> (tick all / clear to change what appears). Refreshed every 30 min by the sync job. <strong>Click a bar</strong> to list that stage's deals with a link straight to each one in HubSpot.</p>
       <div id="stage-chart" style="height: 420px;"></div>
       <div id="stage-deals"></div>
     </section>
@@ -403,7 +441,7 @@ window.VIEWS.pipeline = function (root, ctx) {
         <div class="kpi" style="border-left:4px solid ${THEME.tokens.green};">
           <div class="label">Sold by us</div>
           <div class="value">${soldUs.length.toLocaleString()}</div>
-          <div class="delta-row muted small">${randMoney(soldUsVal)}</div>
+          <div class="delta-row muted small">${randMoney(soldUsVal)} sold · Quay 1 net ${_econRand(soldUsQuayNet)}</div>
         </div>
         <div class="kpi" style="border-left:4px solid #B91C1C;">
           <div class="label">Lost to competitor</div>
@@ -522,35 +560,140 @@ window.VIEWS.pipeline = function (root, ctx) {
     });
   }
 
+  // The stage box (econ panel) drives the funnel + stage bar: they show only
+  // the picked stages. Empty selection = no filter (show everything), so a
+  // "Clear" never leaves a blank chart with no way back.
+  const picksActive = () => __econState.stages && __econState.stages.size > 0;
+  const stagePicked = (s) => !picksActive() || __econState.stages.has(s || "Unknown stage");
+
   // Funnel — rendered as a horizontal bar chart (the "funnel" trace type is
   // not in the plotly-basic bundle this app loads). Bars shrink top→bottom
-  // and carry value + %-of-initial labels, so it reads like a funnel.
-  const funLabels = ["Leads received", "Qualified lead-type", "Deal created", "Worked (call logged)"];
-  const funVals = [nLeads, nQualified, nDeal, nWorked];
-  const funText = funVals.map(v => `${v.toLocaleString()}  (${nLeads ? (v / nLeads * 100).toFixed(0) : 0}%)`);
-  Plotly.newPlot("funnel-chart", [{
-    type: "bar", orientation: "h",
-    y: funLabels.slice().reverse(),
-    x: funVals.slice().reverse(),
-    text: funText.slice().reverse(),
-    textposition: "auto",
-    insidetextanchor: "middle",
-    marker: { color: THEME.PALETTE.slice(0, 4).reverse() },
-    hovertemplate: "%{y}: %{x:,}<extra></extra>",
-  }], { ...THEME.PLOTLY_LAYOUT, margin: { l: 160, r: 24, t: 24, b: 24 },
-        xaxis: { ...THEME.PLOTLY_LAYOUT.xaxis, title: "Leads" } }, THEME.PLOTLY_CONFIG);
+  // and carry value + %-of-initial labels, so it reads like a funnel. The
+  // qualified + worked steps count only deals in the picked stages.
+  function drawFunnel() {
+    const dealsPick = withDeal.filter(l => stagePicked(l.current_stage));
+    const nQual = dealsPick.length;
+    const nWork = dealsPick.filter(l => l.worked).length;
+    const funLabels = ["Leads received", "Deal created", "Qualified (picked stages)", "Worked (call logged)"];
+    const funVals = [nLeads, nDeal, nQual, nWork];
+    const funText = funVals.map(v => `${v.toLocaleString()}  (${nLeads ? (v / nLeads * 100).toFixed(0) : 0}%)`);
+    Plotly.react("funnel-chart", [{
+      type: "bar", orientation: "h",
+      y: funLabels.slice().reverse(),
+      x: funVals.slice().reverse(),
+      text: funText.slice().reverse(),
+      textposition: "auto",
+      insidetextanchor: "middle",
+      marker: { color: THEME.PALETTE.slice(0, 4).reverse() },
+      hovertemplate: "%{y}: %{x:,}<extra></extra>",
+    }], { ...THEME.PLOTLY_LAYOUT, margin: { l: 200, r: 24, t: 24, b: 24 },
+          xaxis: { ...THEME.PLOTLY_LAYOUT.xaxis, title: "Leads" } }, THEME.PLOTLY_CONFIG);
+  }
 
   // Stage bar — chronological top→bottom, labelled with count + HubSpot win %.
-  Plotly.newPlot("stage-chart", [{
-    type: "bar", orientation: "h",
-    y: stageRows.map(r => r[0]).reverse(),
-    x: stageRows.map(r => r[1]).reverse(),
-    text: stageRows.map(r => { const p = stagePct(r[0]); return p == null ? `${r[1]}` : `${r[1]}  ·  ${p}%`; }).reverse(),
-    textposition: "auto",
-    marker: { color: stageRows.map(r => stageCmap[r[0]]).reverse() },
-    hovertemplate: "%{y}<br>%{x} deals<extra></extra>",
-  }], { ...THEME.PLOTLY_LAYOUT, margin: { l: 220, r: 24, t: 24, b: 40 },
-        xaxis: { ...THEME.PLOTLY_LAYOUT.xaxis, title: "Deals" } }, THEME.PLOTLY_CONFIG);
+  // Shows only the picked stages.
+  function drawStageChart() {
+    const shown = stageRows.filter(r => stagePicked(r[0]));
+    Plotly.react("stage-chart", [{
+      type: "bar", orientation: "h",
+      y: shown.map(r => r[0]).reverse(),
+      x: shown.map(r => r[1]).reverse(),
+      text: shown.map(r => { const p = stagePct(r[0]); return p == null ? `${r[1]}` : `${r[1]}  ·  ${p}%`; }).reverse(),
+      textposition: "auto",
+      marker: { color: shown.map(r => stageCmap[r[0]]).reverse() },
+      hovertemplate: "%{y}<br>%{x} deals<extra></extra>",
+    }], { ...THEME.PLOTLY_LAYOUT, margin: { l: 220, r: 24, t: 24, b: 40 },
+          xaxis: { ...THEME.PLOTLY_LAYOUT.xaxis, title: "Deals" } }, THEME.PLOTLY_CONFIG);
+  }
+
+  drawFunnel();
+  drawStageChart();
+
+  // Banked-ROI table (per channel). Recomputed on cost-input change since spend
+  // depends on the per-lead costs; banked commission + counts are fixed above.
+  const _greenTok = (THEME.tokens && THEME.tokens.green) || "#0F6E3B";
+  const _redTok = "#B91C1C";
+  function drawRoi() {
+    const block = document.getElementById("roi-block");
+    if (!block) return;
+    const costs = _econLoadCosts();
+    let tLeads = 0, tSpend = 0, tBankedSales = 0, tBanked = 0, anyCost = false;
+    const bodyRows = econChannels.map(c => {
+      const a = roiAgg[c];
+      const cost = costs[c];
+      const hasCost = Number.isFinite(cost);
+      const spend = hasCost ? a.leads * cost : null;
+      if (hasCost) { anyCost = true; tSpend += spend; }
+      tLeads += a.leads; tBankedSales += a.bankedSales; tBanked += a.banked;
+      const roi = (spend && spend > 0) ? a.banked / spend : null;
+      const net = spend == null ? null : a.banked - spend;
+      return `<tr>
+        <td>${escapeHtml(c)}</td>
+        <td class="num">${a.leads.toLocaleString()}</td>
+        <td class="num">${spend == null ? '<span class="muted">enter cost</span>' : _econRand(spend)}</td>
+        <td class="num">${a.bankedSales.toLocaleString()}</td>
+        <td class="num">${_econRand(a.banked)}</td>
+        <td class="num" style="${net == null ? "" : `color:${net >= 0 ? _greenTok : _redTok};font-weight:600;`}">${net == null ? "—" : _econRand(net)}</td>
+        <td class="num"><strong>${roi == null ? "—" : roi.toFixed(2) + "×"}</strong></td>
+      </tr>`;
+    }).join("");
+    const tRoi = tSpend > 0 ? tBanked / tSpend : null;
+    const tNet = anyCost ? tBanked - tSpend : null;
+    const totalRow = `<tr style="border-top:2px solid var(--line); font-weight:700;">
+      <td>All channels</td>
+      <td class="num">${tLeads.toLocaleString()}</td>
+      <td class="num">${anyCost ? _econRand(tSpend) : "—"}</td>
+      <td class="num">${tBankedSales.toLocaleString()}</td>
+      <td class="num">${_econRand(tBanked)}</td>
+      <td class="num" style="${tNet == null ? "" : `color:${tNet >= 0 ? _greenTok : _redTok};`}">${tNet == null ? "—" : _econRand(tNet)}</td>
+      <td class="num">${tRoi == null ? "—" : tRoi.toFixed(2) + "×"}</td>
+    </tr>`;
+    const nSold = soldUs.length;
+    const avgGross = nSold ? STAGES.grossComm(soldUsVal) / nSold : 0;
+    const avgQuay = nSold ? soldUsQuayNet / nSold : 0;
+    const regNote = salesReg.length ? ""
+      : `<p class="section-caption" style="margin-top:8px;">Banked commission needs the sales register (super/admin, whole book) — not loaded here, so banked columns read R0.</p>`;
+    block.innerHTML = `
+      <div class="table-wrap">
+        <table class="dt">
+          <thead><tr>
+            <th>Channel</th><th class="num">Leads</th><th class="num">Spend</th>
+            <th class="num">Banked sales</th><th class="num">Banked comm</th>
+            <th class="num">Net</th><th class="num">ROI</th>
+          </tr></thead>
+          <tbody>${bodyRows}${totalRow}</tbody>
+        </table>
+      </div>
+      ${regNote}
+      <div class="kpis" style="margin-top:14px;">
+        <div class="kpi" style="border-left:4px solid ${_greenTok};">
+          <div class="label">Avg commission / sale</div>
+          <div class="value">${_econRand(avgGross)}</div>
+          <div class="delta-row muted small">4% + VAT · over ${nSold.toLocaleString()} sold-by-us deal${nSold === 1 ? "" : "s"}</div>
+        </div>
+        <div class="kpi">
+          <div class="label">Quay 1 net / sale</div>
+          <div class="value">${_econRand(avgQuay)}</div>
+          <div class="delta-row muted small">${Math.round(STAGES.QUAY1_SHARE * 100)}% of gross commission</div>
+        </div>
+        <div class="kpi">
+          <div class="label">Total Quay 1 net (projected)</div>
+          <div class="value">${_econRand(soldUsQuayNet)}</div>
+          <div class="delta-row muted small">on ${randMoney(soldUsVal)} of sales</div>
+        </div>
+      </div>
+      <p class="section-caption" style="margin-top:8px;">Projected layer (assumption, not banked): gross commission = sale price &times; 4% &times; 1.15 = 4.60%; Quay 1 keeps ${Math.round(STAGES.QUAY1_SHARE * 100)}%.</p>
+    `;
+  }
+  drawRoi();
+
+  // Redraw the picker-driven charts after a stage toggle, and close the stage
+  // drill-down if its stage is no longer shown.
+  function redrawStageDriven() {
+    drawFunnel();
+    drawStageChart();
+    if (openStage && !stagePicked(openStage)) { openStage = null; if ($stageDeals) $stageDeals.innerHTML = ""; }
+  }
 
   // Click a stage bar → list that stage's deals, each linking to the actual
   // HubSpot deal (portal deep-link) with its address / owner / calls. The bar

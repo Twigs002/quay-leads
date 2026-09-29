@@ -389,6 +389,51 @@ window.VIEWS.pipeline = function (root, ctx) {
     marker: { color: cmapDiv[stage] },
   }));
 
+  // ── Seller leads by division (summary table) ────────────────────────────
+  // Seller leads only, over the current filtered view (respects the sidebar).
+  // Hot / Warm / Nurture are HubSpot DEAL stages (current_stage); "Other" is
+  // every seller lead not in those three (incl. no-deal and other stages) so
+  // Hot + Warm + Nurture + Other reconciles exactly to Seller leads. Deals
+  // created / No deal are an orthogonal has-deal split.
+  const sellerLeads = leads.filter(l => l.is_lead === "Seller Lead");
+  const divDrillSet = new Set(boardRows.map(r => r.div));   // divisions the drill can open
+  const _divKey = l => l.division || "(no division)";   // match board/drill keys exactly
+  const sellerDiv = {};
+  for (const l of sellerLeads) {
+    const k = _divKey(l);
+    const d = sellerDiv[k] || (sellerDiv[k] = { div: k, sellers: 0, hot: 0, warm: 0, nurture: 0, other: 0, deals: 0, noDeal: 0 });
+    d.sellers++;
+    const st = l.current_stage;
+    if (STAGES.isHot(st)) d.hot++;
+    else if (STAGES.isWarm(st)) d.warm++;
+    else if (STAGES.isNurture(st)) d.nurture++;
+    else d.other++;
+    if (l.has_deal) d.deals++; else d.noDeal++;
+  }
+  const sellerDivRows = Object.values(sellerDiv).sort((a, b) => b.sellers - a.sellers);
+  const sellerTot = sellerDivRows.reduce((t, r) => {
+    for (const k of ["sellers", "hot", "warm", "nurture", "other", "deals", "noDeal"]) t[k] += r[k];
+    return t;
+  }, { sellers: 0, hot: 0, warm: 0, nurture: 0, other: 0, deals: 0, noDeal: 0 });
+  const sellerSummaryRow = (r, isTotal) => {
+    const clickable = !isTotal && divDrillSet.has(r.div);
+    const attrs = clickable
+      ? ` class="seller-div-row" data-div="${escapeAttr(r.div)}" style="cursor:pointer;" title="Open ${escapeAttr(r.div)} in the drill below"`
+      : (isTotal ? ' style="border-top:2px solid var(--line); font-weight:700;"' : "");
+    const name = isTotal ? "All divisions"
+      : escapeHtml(r.div) + (clickable ? '' : ' <span class="muted small">(no drill)</span>');
+    return `<tr${attrs}>
+      <td>${name}</td>
+      <td class="num">${r.sellers.toLocaleString()}</td>
+      <td class="num">${r.hot.toLocaleString()}</td>
+      <td class="num">${r.warm.toLocaleString()}</td>
+      <td class="num">${r.nurture.toLocaleString()}</td>
+      <td class="num">${r.deals.toLocaleString()}</td>
+      <td class="num">${r.noDeal.toLocaleString()}</td>
+      <td class="num">${r.other.toLocaleString()}</td>
+    </tr>`;
+  };
+
   root.innerHTML = `
     <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
       <h2 style="margin:0;">Pipeline</h2>
@@ -519,6 +564,33 @@ window.VIEWS.pipeline = function (root, ctx) {
       <h3>Where each division's leads sit</h3>
       <p class="section-caption">Top 15 divisions × HubSpot stages. <strong>Hot Lead</strong> is bright red; <strong>No deal yet</strong> is muted slate.</p>
       <div id="breakdown-chart" style="height: ${Math.max(420, 32 * topDivs.length + 80)}px;"></div>
+    </section>
+
+    <section class="card">
+      <h3>Seller leads by division</h3>
+      <p class="section-caption">
+        Seller leads only, over the current filters. <strong>Hot</strong> (tomorrow to 3 months),
+        <strong>Warm</strong> (3 - 6 months) and <strong>Nurture</strong> (6 - 12 months) are HubSpot deal stages.
+        <strong>Other / unmapped</strong> = every seller lead not in those three (includes no-deal and other stages),
+        so Hot + Warm + Nurture + Other equals Seller leads. Click a division to open it in the drill below.
+      </p>
+      <div class="table-wrap">
+        <table class="dt">
+          <thead><tr>
+            <th>Division</th>
+            <th class="num">Seller leads</th>
+            <th class="num">Hot</th>
+            <th class="num">Warm</th>
+            <th class="num">Nurture</th>
+            <th class="num">Deals created</th>
+            <th class="num">No deal</th>
+            <th class="num">Other / unmapped</th>
+          </tr></thead>
+          <tbody>${sellerDivRows.map(r => sellerSummaryRow(r, false)).join("")
+            || `<tr><td colspan="8" class="muted" style="padding:14px;">No seller leads in the current filters.</td></tr>`}
+          ${sellerDivRows.length ? sellerSummaryRow(sellerTot, true) : ""}</tbody>
+        </table>
+      </div>
     </section>
 
     <section class="card">
@@ -781,6 +853,40 @@ window.VIEWS.pipeline = function (root, ctx) {
     );
     const total = sub.length;
     const dealsOnly = sub.filter(l => l.has_deal).length;
+
+    // Seller-lead deal detail: one row per seller lead with its associated deal
+    // (name, stage, owner, created); "No deal" where there is none. Deals first,
+    // then newest deal. Owner is the numeric HubSpot owner id (no name source),
+    // linked to the HubSpot user page.
+    const sellerSub = sub.filter(l => l.is_lead === "Seller Lead").sort((a, b) =>
+      (Number(b.has_deal) - Number(a.has_deal))
+      || ((b.deal_created_d ? b.deal_created_d.getTime() : 0) - (a.deal_created_d ? a.deal_created_d.getTime() : 0)));
+    const none = '<span class="muted">No deal</span>';
+    const sellerRows = sellerSub.map(l => {
+      const name = escapeHtml(l.client_name || l.deal_name || l.property_address || l.email || "(unknown)");
+      const dealName = l.has_deal ? escapeHtml(l.deal_name || "(unnamed deal)") : none;
+      const stage = l.has_deal ? escapeHtml(l.current_stage || "(no stage)") : none;
+      const owner = l.has_deal
+        ? (l.hubspot_owner_id
+            ? `<a href="${UTILS.hsOwnerLink(l.hubspot_owner_id)}" target="_blank" rel="noopener">${escapeHtml(String(l.hubspot_owner_id))} ↗</a>`
+            : '<span class="muted">-</span>')
+        : none;
+      const created = l.has_deal
+        ? (l.deal_created_d ? escapeHtml(UTILS.fmtShortDate(l.deal_created_d)) : '<span class="muted">-</span>')
+        : none;
+      const link = l.deal_id
+        ? `<a href="${UTILS.hsDealLink(l.deal_id)}" target="_blank" rel="noopener">Open ↗</a>`
+        : '<span class="muted">-</span>';
+      return `<tr>
+        <td>${name}</td>
+        <td>${dealName}</td>
+        <td>${stage}</td>
+        <td>${owner}</td>
+        <td>${created}</td>
+        <td class="num">${link}</td>
+      </tr>`;
+    }).join("");
+
     $drill.innerHTML = `
       <p><strong>${escapeHtml(div)}</strong> — ${total} leads in this view · ${dealsOnly} have a HubSpot deal · ${total - dealsOnly} have no deal yet</p>
       <div class="table-wrap">
@@ -807,10 +913,39 @@ window.VIEWS.pipeline = function (root, ctx) {
           }).join("")}</tbody>
         </table>
       </div>
+
+      <h4 style="margin:18px 0 6px;">Seller leads - deal detail</h4>
+      <p class="section-caption">One row per seller lead in ${escapeHtml(div)}. Owner is the HubSpot owner id (no name source available).</p>
+      <div class="table-wrap">
+        <table class="dt">
+          <thead><tr>
+            <th>Contact</th>
+            <th>Deal name</th>
+            <th>Deal stage</th>
+            <th>Deal owner</th>
+            <th>Created</th>
+            <th class="num">HubSpot</th>
+          </tr></thead>
+          <tbody>${sellerRows || `<tr><td colspan="6" class="muted" style="padding:14px;">No seller leads in this division in the current filters.</td></tr>`}</tbody>
+        </table>
+      </div>
     `;
   }
   $sel.addEventListener("change", renderDrill);
   renderDrill();
+
+  // Clicking a division row in the "Seller leads by division" summary opens that
+  // division in the drill above and scrolls to it.
+  root.querySelectorAll(".seller-div-row").forEach(tr => {
+    tr.addEventListener("click", () => {
+      const div = tr.getAttribute("data-div");
+      if (!div) return;
+      $sel.value = div;
+      renderDrill();
+      const sec = $sel.closest("section");
+      if (sec) sec.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  });
 };
 
 function barCell(p) {

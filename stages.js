@@ -52,7 +52,12 @@ window.STAGES = (() => {
 
   const WON  = "Sold By Us";              // closed sale by us (HubSpot stage string)
   const LOST = "Listed with Competitor";  // listed elsewhere
+  // Nurture ladder - HubSpot deal stages (current_stage), by timeframe to list:
+  //   Nurture = 6-12 months, Warm = 3-6 months, Hot = tomorrow to 3 months.
+  // These are the exact deal-stage strings as they read in HubSpot.
   const NURTURE = "Contacted - Lead to Nurture";
+  const WARM    = "Contacted - Warm Lead (Courtesy)";
+  const HOT     = "Contacted - Hot Lead";
   const OUT_OF_AREA = "Not My Area";      // HubSpot's own out-of-farming-area marker
 
   // Won-the-listing milestones. In this book almost nothing reaches "Sold"
@@ -129,17 +134,20 @@ window.STAGES = (() => {
     if (/\bmeta\b/i.test(s)) return "Meta";
     return s;
   }
+  function isHot(stage)     { return stage === HOT; }
+  function isWarm(stage)    { return stage === WARM; }
+  function isNurture(stage) { return stage === NURTURE; }
   function isMandate(stage)   { return MANDATE.has(stage); }
   // Won the listing = has a mandate, or the rare fully-closed sale.
   function isWonListing(stage){ return MANDATE.has(stage) || stage === WON; }
   function isLost(stage)      { return COMPETITOR_LOST.has(stage); }
 
   return {
-    ORDER, NOT_QUALIFIED, HIDDEN, WON, LOST, NURTURE, OUT_OF_AREA, MANDATE, COMPETITOR_LOST,
+    ORDER, NOT_QUALIFIED, HIDDEN, WON, LOST, NURTURE, WARM, HOT, OUT_OF_AREA, MANDATE, COMPETITOR_LOST,
     META_SOURCE_RE, META_COST_PER_LEAD, QUALIFIED_TARGET_COST, COMMISSION_RATE,
     COMM_FEE_RATE, VAT_RATE, COMM_GROSS_RATE, QUAY1_SHARE, grossComm, quay1Net,
     CALLER_SALARIES_MONTHLY, CALLING_COST_MONTHLY, DIALFIRE_MONTHLY_COST,
     DIALFIRE_LEADS_PER_MONTH_FALLBACK,
-    orderIndex, isQualified, isHidden, isMetaSource, canonicalSource, isMandate, isWonListing, isLost,
+    orderIndex, isQualified, isHidden, isHot, isWarm, isNurture, isMetaSource, canonicalSource, isMandate, isWonListing, isLost,
   };
 })();

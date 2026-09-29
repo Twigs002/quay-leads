@@ -158,7 +158,7 @@
       </section>
       <div class="foot">
         <b>Market</b> = CMA registered sales &amp; transfers per suburb (all agencies), rolled up to the team that owns those suburbs. 2025 = full calendar year; Q1–Q3 2026 by sale date. Q3 2026 is <b>partial</b> (still registering) and excluded from run-rate.
-        <b>Quay actuals</b> = Quay 1's own deal book, counted by <b>acceptance date</b>, property value in ZAR. Includes rentals &amp; commercial divisions (no market comparison exists for those). Suburbs unmatched in CMA are omitted from market totals.
+        <b>Quay actuals</b> = Quay 1's <b>sold (paid-out) deals</b> by acceptance date, property value in ZAR. Includes rentals &amp; commercial divisions (no market comparison for those). Recent 2026 quarters understate slightly while deals are still registering / paying out. Suburbs unmatched in CMA are omitted from market totals.
       </div>`;
     root.innerHTML = "";
     root.appendChild(wrap);

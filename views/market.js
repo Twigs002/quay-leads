@@ -55,6 +55,7 @@
 .mkt .qbar .v{position:absolute;top:-18px;left:50%;transform:translateX(-50%);font-size:10.5px;font-weight:700;white-space:nowrap;color:var(--slate)}
 .mkt .qlab{font-size:12.5px;font-weight:600;color:var(--ink);text-align:center}
 .mkt .qlab small{display:block;color:var(--muted);font-weight:500;font-size:11px}
+.mkt .chart{width:100%}
 .mkt .lb{display:flex;flex-direction:column;gap:10px;margin-top:14px}
 .mkt .lbrow{display:grid;grid-template-columns:20px 120px 1fr auto;align-items:center;gap:11px}
 .mkt .rank{font-size:12px;color:var(--muted);text-align:right;font-weight:600}
@@ -102,6 +103,18 @@
         <div class="sub">Every registered residential sale in our teams' suburbs (the <b>market</b>, from CMA), next to the deals Quay 1 actually closed (the <b>actuals</b>, by acceptance date). Read it as a resource map: a big market bar next to a thin Quay bar is opportunity left on the table.</div>
       </div>
       <div class="kpis" id="mkt-kpis"></div>
+      <section class="panel">
+        <div class="phead"><h2>Market trajectory &middot; 2022 &rarr; 2025</h2><span class="note">CMA registered turnover (all agencies) in our farmed suburbs</span></div>
+        <div id="mkt-trend" class="chart" style="height:340px"></div>
+      </section>
+      <section class="panel">
+        <div class="phead"><h2>Top teams &middot; turnover trend</h2><span class="note">Eight biggest markets, 2022 &rarr; 2025 &middot; click a name to toggle</span></div>
+        <div id="mkt-teamtrend" class="chart" style="height:360px"></div>
+      </section>
+      <section class="panel">
+        <div class="phead"><h2>Growth vs contraction</h2><span class="note">3-year turnover CAGR, teams &gt; R400m in 2025 &middot; green = growing, red = shrinking</span></div>
+        <div id="mkt-growth" class="chart" style="height:520px"></div>
+      </section>
       <div class="grid cols">
         <div class="panel">
           <div class="phead">
@@ -168,6 +181,57 @@
     ];
     wrap.querySelector("#mkt-kpis").innerHTML = kpiData.map(k =>
       '<div class="kpi"><div class="lab">' + k.lab + '</div><div class="big">' + k.big + '</div><div class="meta">' + k.meta + (k.extra ? ' ' + k.extra : '') + '</div></div>').join("");
+
+    // ── Market trajectory (2022-2025) Plotly charts ─────────
+    (function trajectory(){
+      const MY = window.MARKET_YEARS;
+      const host1 = wrap.querySelector("#mkt-trend");
+      if (!MY || !window.Plotly) { if(host1) host1.innerHTML = '<div class="note" style="padding:20px">Multi-year chart data not loaded.</div>'; return; }
+      const yr = MY.years.map(String);
+      const bn = v => +(v/1e9).toFixed(3);
+      const T = THEME.tokens;
+      // 1) Company turnover (area) + sales volume (secondary axis)
+      const l1 = THEME.PLOTLY_LAYOUT;
+      l1.margin = {l:54,r:54,t:14,b:34};
+      l1.xaxis.type = "category";
+      l1.yaxis.title = {text:"Turnover (Rbn)", font:{size:11,color:T.muted}};
+      l1.yaxis2 = {overlaying:"y", side:"right", showgrid:false, rangemode:"tozero",
+        tickfont:{color:T.muted}, title:{text:"Sales (units)", font:{size:11,color:T.muted}}};
+      l1.legend = {orientation:"h", y:1.14, x:0, font:{color:T.slate}};
+      Plotly.newPlot(host1, [
+        {x:yr, y:MY.company.turnover.map(bn), type:"scatter", mode:"lines+markers",
+         name:"Market turnover (Rbn)", line:{color:T.blue,width:3,shape:"spline"},
+         fill:"tozeroy", fillcolor:"rgba(152,197,237,0.22)", marker:{size:9}},
+        {x:yr, y:MY.company.salesByYear, type:"scatter", mode:"lines+markers", yaxis:"y2",
+         name:"Sales volume", line:{color:T.yellowDeep,width:2,dash:"dot"}, marker:{size:6}},
+      ], l1, THEME.PLOTLY_CONFIG);
+      // 2) Top-8 team turnover trend lines
+      const top = MY.teams.slice().sort((a,b)=>b.t[3]-a.t[3]).slice(0,8);
+      const l2 = THEME.PLOTLY_LAYOUT;
+      l2.margin = {l:52,r:16,t:14,b:56};
+      l2.xaxis.type = "category";
+      l2.yaxis.title = {text:"Turnover (Rbn)", font:{size:11,color:T.muted}};
+      l2.legend = {orientation:"h", y:-0.16, font:{size:10,color:T.slate}};
+      Plotly.newPlot(wrap.querySelector("#mkt-teamtrend"),
+        top.map(t=>({x:yr, y:t.t.map(bn), type:"scatter", mode:"lines+markers",
+          name:t.team, line:{width:2.4,shape:"spline"}, marker:{size:5}})),
+        l2, THEME.PLOTLY_CONFIG);
+      // 3) Growth vs contraction — horizontal CAGR bars
+      const elig = MY.teams.filter(t=>t.t[3]>400e6 && !t.anomaly && t.cagr!=null);
+      const sorted = elig.slice().sort((a,b)=>b.cagr-a.cagr);
+      const pick = sorted.slice(0,11).concat(sorted.slice(-9));
+      pick.sort((a,b)=>a.cagr-b.cagr);
+      const l3 = THEME.PLOTLY_LAYOUT;
+      l3.margin = {l:100,r:28,t:8,b:34};
+      l3.xaxis.title = {text:"3-year turnover CAGR", font:{size:11,color:T.muted}};
+      l3.xaxis.tickformat = ".0%";
+      Plotly.newPlot(wrap.querySelector("#mkt-growth"), [{
+        type:"bar", orientation:"h",
+        x:pick.map(t=>+(t.cagr).toFixed(4)), y:pick.map(t=>t.team),
+        marker:{color:pick.map(t=>t.cagr>=0?T.green:T.red)},
+        hovertemplate:"%{y}: %{x:.1%}/yr<extra></extra>"
+      }], l3, THEME.PLOTLY_CONFIG);
+    })();
 
     // ── Company snapshot (replaces the old "read of the room" panel) ──
     const topMarkets = Object.keys(market).map(t => ({ t, mk: market[t].t })).sort((a, b) => b.mk - a.mk).slice(0, 3);

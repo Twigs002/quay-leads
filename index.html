@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&family=Permanent+Marker&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=20260923-1">
+  <link rel="stylesheet" href="styles.css?v=20260929-1">
   <!-- Shared Quay 1 app switcher (superuser-only dropdown on the flag) -->
   <script src="https://twigs002.github.io/quay-dashboard-v2/quay-nav.js" defer></script>
 </head>
@@ -49,6 +49,7 @@
         <a href="#/overview"        data-tab="overview">Overview</a>
         <a href="#/sources"         data-tab="sources">Sources</a>
         <a href="#/pipeline"        data-tab="pipeline">Pipeline</a>
+        <a href="#/market"          data-tab="market">Market</a>
         <a href="#/lead-economics"  data-tab="lead-economics" data-super="1" hidden>Lead economics</a>
         <a href="#/track"           data-tab="track">Track</a>
         <a href="#/reassignment"    data-tab="reassignment" data-super="1" hidden>Reassignment</a>
@@ -157,23 +158,27 @@
        Pages caches static files for 10 min, so after a deploy browsers can serve
        stale JS/CSS. BUMP the ?v= value (styles.css + every script here) on every
        release so browsers fetch the new files immediately instead of the cache. -->
-  <script defer src="config.js?v=20260923-1"></script>
-  <script defer src="utils.js?v=20260923-1"></script>
-  <script defer src="theme.js?v=20260923-1"></script>
-  <script defer src="stages.js?v=20260923-1"></script>
-  <script defer src="suburb_sales.js?v=20260923-1"></script>
-  <script defer src="data.js?v=20260923-1"></script>
-  <script defer src="filters.js?v=20260923-1"></script>
-  <script defer src="views/overview.js?v=20260923-1"></script>
-  <script defer src="views/sources.js?v=20260923-1"></script>
+  <script defer src="config.js?v=20260929-1"></script>
+  <script defer src="utils.js?v=20260929-1"></script>
+  <script defer src="theme.js?v=20260929-1"></script>
+  <script defer src="stages.js?v=20260929-1"></script>
+  <script defer src="suburb_sales.js?v=20260929-1"></script>
+  <script defer src="data.js?v=20260929-1"></script>
+  <script defer src="filters.js?v=20260929-1"></script>
+  <script defer src="views/overview.js?v=20260929-1"></script>
+  <script defer src="views/sources.js?v=20260929-1"></script>
   <!-- meta_report.js exposes window.renderMetaBlock, used by the Pipeline view;
        it must load before pipeline.js. It no longer registers its own tab. -->
-  <script defer src="views/meta_report.js?v=20260923-1"></script>
-  <script defer src="views/pipeline.js?v=20260923-1"></script>
-  <script defer src="views/lead_economics.js?v=20260923-1"></script>
-  <script defer src="views/track.js?v=20260923-1"></script>
-  <script defer src="views/reassignment.js?v=20260923-1"></script>
-  <script defer src="views/raw_data.js?v=20260923-1"></script>
-  <script defer src="app.js?v=20260923-1"></script>
+  <script defer src="views/meta_report.js?v=20260929-1"></script>
+  <script defer src="views/pipeline.js?v=20260929-1"></script>
+  <script defer src="views/lead_economics.js?v=20260929-1"></script>
+  <script defer src="views/track.js?v=20260929-1"></script>
+  <script defer src="views/reassignment.js?v=20260929-1"></script>
+  <script defer src="views/raw_data.js?v=20260929-1"></script>
+  <!-- Market vs Actuals: CMA market pull vs Quay actuals (COO view). suburbs → data → view load order matters. -->
+  <script defer src="market_suburbs.js?v=20260929-1"></script>
+  <script defer src="market_data.js?v=20260929-1"></script>
+  <script defer src="views/market.js?v=20260929-1"></script>
+  <script defer src="app.js?v=20260929-1"></script>
 </body>
 </html>

@@ -5,6 +5,17 @@ window.DATA = (() => {
   let _client = null;
   let _cache = null;
 
+  // Parse a date string, rejecting implausible years (register/CRM typos like
+  // "2052" that otherwise render as real dates and skew date-range filters).
+  // Returns a Date in [2015 .. currentYear+2], else null.
+  function _parseDate(str) {
+    if (!str) return null;
+    const d = new Date(str);
+    if (isNaN(d)) return null;
+    const y = d.getFullYear();
+    return (y >= 2015 && y <= new Date().getFullYear() + 2) ? d : null;
+  }
+
   function client() {
     if (!_client) {
       _client = supabase.createClient(QUAY.SUPABASE_URL, QUAY.SUPABASE_ANON_KEY);
@@ -115,8 +126,7 @@ window.DATA = (() => {
         : "other";
       // When the deal was created (drives live Dialfire monthly volume on
       // Costings). null until the deal_created migration + a reload land it.
-      const dc = l.deal_created ? new Date(l.deal_created) : null;
-      l.deal_created_d = dc && !isNaN(dc) ? dc : null;
+      l.deal_created_d = _parseDate(l.deal_created);
     }
     // Whole-book pipeline value by stage (super/admin only; empty for others).
     // Tolerate the table not existing yet so the dashboard keeps working before
@@ -143,8 +153,7 @@ window.DATA = (() => {
       s.is_rental = !!s.is_rental;
       // Date used for monthly rollups: transfer date if present, else acceptance.
       const dstr = s.transfer_date || s.acceptance_date || null;
-      const d = dstr ? new Date(dstr) : null;
-      s.deal_date_d = d && !isNaN(d) ? d : null;
+      s.deal_date_d = _parseDate(dstr);
     }
     // Rebuild the suburb reference table from the register (all suburbs), so
     // Costings/CFO use real averages instead of the hand-mapped fallback.

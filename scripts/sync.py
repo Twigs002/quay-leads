@@ -468,12 +468,12 @@ def fetch_deals(sess: requests.Session, deal_ids: Iterable[str]) -> tuple[list[d
                 "current_stage_id":  p.get("dealstage"),
                 "deal_name":         p.get("dealname"),
                 "amount":            _to_float(p.get("amount")),
-                "close_date":        p.get("closedate"),
-                "hs_last_modified":  p.get("hs_lastmodifieddate"),
+                "close_date":        _to_ts(p.get("closedate")),
+                "hs_last_modified":  _to_ts(p.get("hs_lastmodifieddate")),
                 "hubspot_owner_id":  p.get("hubspot_owner_id"),
                 "pipeline":          p.get("pipeline"),
                 "probability":       _to_float(p.get("hs_deal_stage_probability")),
-                "hs_createdate":     p.get("hs_createdate"),
+                "hs_createdate":     _to_ts(p.get("hs_createdate")),
                 "hs_object_source":  p.get("hs_object_source_label"),
                 "hs_object_source_detail": p.get("hs_object_source_detail_1"),
             })
@@ -635,6 +635,17 @@ def _to_float(v):
         return None
 
 
+def _to_ts(v):
+    """Sanitise a value destined for a Postgres timestamptz column. HubSpot
+    returns "" (not null) for unset date properties like closedate, which
+    Postgres rejects with 22007 and sinks the whole upsert. Return None for
+    empty/blank so the column goes NULL instead."""
+    if v is None:
+        return None
+    s = str(v).strip()
+    return s or None
+
+
 # ── Supabase upserts ────────────────────────────────────────────────────
 def upsert_chunked(sb: Client, table: str, rows: list[dict], on_conflict: str, chunk_size: int = 500):
     n = 0
@@ -759,7 +770,7 @@ def main():
                 call_rows.append({
                     "deal_id":          did,
                     "call_id":          cid,
-                    "ts":               det["ts"],
+                    "ts":               _to_ts(det["ts"]),
                     "direction":        det["direction"],
                     "disposition":      det["disposition"],
                     "hubspot_owner_id": det["hubspot_owner_id"],

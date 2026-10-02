@@ -723,20 +723,12 @@ window.VIEWS.pipeline = function (root, ctx) {
     const nSold = soldUs.length;
     const avgGross = nSold ? STAGES.grossComm(soldUsVal) / nSold : 0;
     const avgQuay = nSold ? soldUsQuayNet / nSold : 0;
-    const regNote = salesReg.length ? ""
-      : `<p class="section-caption" style="margin-top:8px;">Banked commission needs the sales register (super/admin, whole book) — not loaded here, so banked columns read R0.</p>`;
-    block.innerHTML = `
-      <div class="table-wrap">
-        <table class="dt">
-          <thead><tr>
-            <th>Channel</th><th class="num">Leads</th><th class="num">Spend</th>
-            <th class="num">Banked sales</th><th class="num">Banked comm</th>
-            <th class="num">Net</th><th class="num">ROI</th>
-          </tr></thead>
-          <tbody>${bodyRows}${totalRow}</tbody>
-        </table>
-      </div>
-      ${regNote}
+    // WON-stage deals with no Amount in HubSpot can only project R0. Say why
+    // instead of showing three misleading zeros (banked commission is separate).
+    const noAmounts = nSold > 0 && soldUsVal === 0;
+    const projBlock = noAmounts
+      ? `<p class="section-caption" style="margin-top:14px;">Projected commission needs an <strong>Amount</strong> on the ${nSold.toLocaleString()} &ldquo;Sold By Us&rdquo; deal${nSold === 1 ? "" : "s"} in HubSpot &mdash; none is set, so the projection reads R0. Banked commission above is unaffected.</p>`
+      : `
       <div class="kpis" style="margin-top:14px;">
         <div class="kpi" style="border-left:4px solid ${_greenTok};">
           <div class="label">Avg commission / sale</div>
@@ -754,7 +746,22 @@ window.VIEWS.pipeline = function (root, ctx) {
           <div class="delta-row muted small">on ${randMoney(soldUsVal)} of sales</div>
         </div>
       </div>
-      <p class="section-caption" style="margin-top:8px;">Projected layer (assumption, not banked): gross commission = sale price &times; 4% &times; 1.15 = 4.60%; Quay 1 keeps ${Math.round(STAGES.QUAY1_SHARE * 100)}%.</p>
+      <p class="section-caption" style="margin-top:8px;">Projected layer (assumption, not banked): gross commission = sale price &times; 4% &times; 1.15 = 4.60%; Quay 1 keeps ${Math.round(STAGES.QUAY1_SHARE * 100)}%.</p>`;
+    const regNote = salesReg.length ? ""
+      : `<p class="section-caption" style="margin-top:8px;">Banked commission needs the sales register (super/admin, whole book) — not loaded here, so banked columns read R0.</p>`;
+    block.innerHTML = `
+      <div class="table-wrap">
+        <table class="dt">
+          <thead><tr>
+            <th>Channel</th><th class="num">Leads</th><th class="num">Spend</th>
+            <th class="num">Banked sales</th><th class="num">Banked comm</th>
+            <th class="num">Net</th><th class="num">ROI</th>
+          </tr></thead>
+          <tbody>${bodyRows}${totalRow}</tbody>
+        </table>
+      </div>
+      ${regNote}
+      ${projBlock}
     `;
   }
   drawRoi();

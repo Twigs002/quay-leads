@@ -28,6 +28,21 @@ window.VIEWS.overview = function (root, ctx) {
   const hasDeal = leads.filter(l => l.has_deal).length;
   const worked = leads.filter(l => l.worked).length;
 
+  // True HubSpot deals CREATED in the current range (by deal createdate), from
+  // the whole deal book (hs_deals_all) — independent of the lead sheet, so this
+  // reconciles with HubSpot's "deals created" where the lead-based counts can't.
+  // Super/admin only (RLS-gated; empty for everyone else → card hidden).
+  const hsDeals = (ctx.cache && ctx.cache.allDeals) || [];
+  const fstate = window.FILTERS && FILTERS.state;
+  const teamLc = (fstate && fstate.divisions && fstate.divisions.size)
+    ? new Set([...fstate.divisions].map(x => (x || "").toLowerCase())) : null;
+  const inHsRange = d => d
+    && (!fstate || !fstate.from || d >= fstate.from)
+    && (!fstate || !fstate.to || d <= fstate.to);
+  const hsDealsCreated = hsDeals.filter(d =>
+    inHsRange(d.createdate_d) && (!teamLc || teamLc.has((d.team || "").toLowerCase()))).length;
+  const hsDealsAvail = hsDeals.length > 0;
+
   // ── Cost per qualified lead (item: R80 per meta lead) ───────────────────
   // Spend = (# meta-sourced leads) × R80. A META lead is "qualified" once its
   // HubSpot deal reaches any real stage except please delete / Past Let -
@@ -138,6 +153,7 @@ window.VIEWS.overview = function (root, ctx) {
       ${kpiCard("Seller leads", seller, pct(seller, leads.length))}
       ${kpiCard("Has deal", hasDeal, pct(hasDeal, leads.length))}
       ${kpiCard("Worked", worked, pct(worked, leads.length))}
+      ${hsDealsAvail ? kpiCard("Deals created (HubSpot)", hsDealsCreated, "whole book · by deal createdate") : ""}
     </div>
 
     <section class="card" style="margin-top: 16px;">

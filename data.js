@@ -174,6 +174,14 @@ window.DATA = (() => {
     if (window.SUBURB_SALES && SUBURB_SALES.buildFromRegister) {
       SUBURB_SALES.buildFromRegister(salesDeals);
     }
+    // Whole-book HubSpot deals (super/admin only; empty for others) — the true
+    // "Deals created (HubSpot)" count per team, independent of the lead sheet.
+    // Tolerate the table not existing yet (before its migration lands).
+    const allDeals = await _allRowsOptional("hs_deals_all");
+    for (const d of allDeals) {
+      d.createdate_d = _parseDate(d.createdate);
+      d.amount = d.amount == null ? null : Number(d.amount);
+    }
     const syncMain = status.find(s => s.name === "leads_sync");
     const syncTeam = status.find(s => s.name === "team_activity_sync");
     _cache = {
@@ -181,6 +189,7 @@ window.DATA = (() => {
       teamActivity: teamActivity || [],
       stageValue: stageValue || [],
       salesDeals: salesDeals || [],
+      allDeals: allDeals || [],
       lastSync: syncMain ? syncMain.last_synced_at : null,
       syncOk: syncMain ? !!syncMain.ok : null,
       syncMessage: syncMain ? syncMain.message : null,

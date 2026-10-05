@@ -42,7 +42,9 @@ import requests
 from supabase import Client, create_client
 
 HS_API = "https://api.hubapi.com"
-THROTTLE_S = 0.35
+# Owner-requested conservative rate: 1 request / 10s (for now). Override with the
+# HS_THROTTLE_S env var (e.g. 0.35) to restore the previous ~3 req/s.
+THROTTLE_S = float(os.environ.get("HS_THROTTLE_S", "10"))
 BATCH = 100
 # HubSpot's contacts batch/read caps propertiesWithHistory requests at 50
 # per call (400 VALIDATION_ERROR at >50). Plain batch/read is still 100.

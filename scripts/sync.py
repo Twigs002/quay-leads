@@ -56,10 +56,13 @@ HS_PROPS = [
     "hs_object_source_detail_1",
 ]
 BATCH = 100
-THROTTLE_S = 0.35  # ~3 req/s — well under HubSpot's 10/s sustained
-# The whole-book deal ingest is NET-NEW bulk load; throttle it hard (1 req / 10s)
-# per the owner's explicit rate-limit rule so it can never contend for the token.
-DEALS_THROTTLE_S = 10.0
+# Owner-requested conservative rate: 1 request / 10s across the whole sync (for
+# now). Override without a code change via the HS_THROTTLE_S env var — e.g. set
+# HS_THROTTLE_S=0.35 in the workflow to restore the previous ~3 req/s once the
+# rate-limit caution is lifted.
+THROTTLE_S = float(os.environ.get("HS_THROTTLE_S", "10"))
+# Whole-book deal ingest shares the same conservative rate.
+DEALS_THROTTLE_S = THROTTLE_S
 DEALS_LOOKBACK_MONTHS = 12
 SHEET_ID_DEFAULT = "1-36ANzAzzi5N0vmLG0hAVkBnFkhkFCh4fGXFenlexe0"
 DEAL_RE = re.compile(r"DealID:\s*(\d+)", re.IGNORECASE)

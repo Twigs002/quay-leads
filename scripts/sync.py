@@ -248,7 +248,7 @@ def _parse_dt_dayfirst(v):
         dt = (v if v.tzinfo else v.replace(tzinfo=SAST)).astimezone(SAST)
     else:
         s = str(v).strip()
-        for fmt in ("%d/%m/%Y %H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d"):
+        for fmt in ("%d/%m/%Y %H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d", "%d/%m/%Y"):
             try:
                 dt = datetime.strptime(s, fmt).replace(tzinfo=SAST)
                 break

@@ -252,16 +252,25 @@ window.FILTERS = (() => {
     });
   }
 
-  function apply(leads) {
+  // opts.skipDates: apply every filter EXCEPT the date range (used by the
+  // Overview rolling "last 30/7 days" KPIs, which set their own windows but must
+  // still honour division/source/lead-type/origin).
+  function apply(leads, opts = {}) {
     return leads.filter(l => {
-      if (state.from && (!l.datestamp_d || l.datestamp_d < state.from)) return false;
-      if (state.to   && (!l.datestamp_d || l.datestamp_d > state.to)) return false;
+      if (!opts.skipDates) {
+        if (state.from && (!l.datestamp_d || l.datestamp_d < state.from)) return false;
+        if (state.to   && (!l.datestamp_d || l.datestamp_d > state.to)) return false;
+      }
       if (state.divisions.size && !state.divisions.has(l.division)) return false;
       if (state.sources.size && !state.sources.has(l.source)) return false;
       if (state.leadTypes.size && !state.leadTypes.has(l.is_lead)) return false;
       if (state.noDealOnly && l.has_deal) return false;
-      if (state.leadOrigin === "dialfire" && l.deal_creation !== "auto") return false;
-      if (state.leadOrigin === "slb" && l.deal_creation === "auto") return false;
+      // "Dialfire"/"Seller Lead Bank" use STAGES.leadChannel so a Meta lead whose
+      // deal was auto-created by n8n is NOT counted as Dialfire (Meta is its own
+      // channel, excluded from both). Keeps the sidebar in step with the Pipeline
+      // channel panel (pipeline._econChannel).
+      if (state.leadOrigin === "dialfire" && STAGES.leadChannel(l) !== "dialfire") return false;
+      if (state.leadOrigin === "slb" && STAGES.leadChannel(l) !== "slb") return false;
       return true;
     });
   }

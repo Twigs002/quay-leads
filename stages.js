@@ -141,6 +141,16 @@ window.STAGES = (() => {
   // Won the listing = has a mandate, or the rare fully-closed sale.
   function isWonListing(stage){ return MANDATE.has(stage) || stage === WON; }
   function isLost(stage)      { return COMPETITOR_LOST.has(stage); }
+  // Single source of truth for which acquisition channel a lead belongs to.
+  // Meta is its OWN channel (we paid Meta for the lead) even when the n8n pipe
+  // later auto-created its deal — so a Meta lead is never "Dialfire". Only a
+  // non-Meta, auto-created deal is Dialfire; everything else is the Seller Lead
+  // Bank sheet book. Mirrored by pipeline._econChannel and the sidebar filter.
+  function leadChannel(l) {
+    if (l && isMetaSource(l.source)) return "meta";
+    if (l && l.deal_creation === "auto") return "dialfire";
+    return "slb";
+  }
 
   return {
     ORDER, NOT_QUALIFIED, HIDDEN, WON, LOST, NURTURE, WARM, HOT, OUT_OF_AREA, MANDATE, COMPETITOR_LOST,
@@ -148,6 +158,6 @@ window.STAGES = (() => {
     COMM_FEE_RATE, VAT_RATE, COMM_GROSS_RATE, QUAY1_SHARE, grossComm, quay1Net,
     CALLER_SALARIES_MONTHLY, CALLING_COST_MONTHLY, DIALFIRE_MONTHLY_COST,
     DIALFIRE_LEADS_PER_MONTH_FALLBACK,
-    orderIndex, isQualified, isHidden, isHot, isWarm, isNurture, isMetaSource, canonicalSource, isMandate, isWonListing, isLost,
+    orderIndex, isQualified, isHidden, isHot, isWarm, isNurture, isMetaSource, canonicalSource, leadChannel, isMandate, isWonListing, isLost,
   };
 })();

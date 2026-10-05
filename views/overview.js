@@ -12,10 +12,14 @@ window.VIEWS.overview = function (root, ctx) {
   const now = new Date();
   const cutoff = (days) => { const d = new Date(now); d.setDate(now.getDate() - days); return d; };
   const c30 = cutoff(30), c60 = cutoff(60), c7 = cutoff(7), c14 = cutoff(14);
-  // Rolling-window KPIs are absolute ("last 30 days"), so compute them from the
-  // whole book — not ctx.view.leads, which is already date-filtered (a 30d/7d
-  // preset would otherwise empty the previous window and drop the delta).
-  const book = (ctx.cache && ctx.cache.leads) || leads;
+  // Rolling-window KPIs are absolute ("last 30 days"), so they set their own
+  // windows instead of the sidebar date range — but must still honour the
+  // division/source/lead-type/origin filters. skipDates applies everything
+  // except the date range (a super filtered to one team now sees that team's
+  // rolling deltas, not the whole company's).
+  const book = window.FILTERS
+    ? FILTERS.apply((ctx.cache && ctx.cache.leads) || leads, { skipDates: true })
+    : ((ctx.cache && ctx.cache.leads) || leads);
   const last30 = book.filter(l => l.datestamp_d && l.datestamp_d >= c30).length;
   const prev30 = book.filter(l => l.datestamp_d && l.datestamp_d >= c60 && l.datestamp_d < c30).length;
   const last7  = book.filter(l => l.datestamp_d && l.datestamp_d >= c7).length;
@@ -125,6 +129,7 @@ window.VIEWS.overview = function (root, ctx) {
   root.innerHTML = `
     <h2>Overview</h2>
     <p class="lede">${leads.length.toLocaleString()} leads match the current filters.</p>
+    <p class="muted small" style="margin-top:-6px;">Counts are captured leads (one row per email). Any "deal" figure counts leads that carry a HubSpot deal, dated by lead-arrival — not every HubSpot deal created.</p>
 
     <div class="kpis">
       ${kpiCard("Leads in view", leads.length, "", "spark-total")}
@@ -165,11 +170,11 @@ window.VIEWS.overview = function (root, ctx) {
       <h3>Farming area</h3>
       <p class="section-caption">
         Leads outside our farmed suburbs (the division-area breakdown) are <strong>unqualified</strong>.
-        <em>Deals created</em> counts only deals inside the farming area.
+        <em>Deals in area</em> counts captured leads that carry a HubSpot deal, inside the farming area — not every HubSpot deal created.
       </p>
       ${areaKnown ? `
       <div class="kpis" style="margin-top: 4px;">
-        ${kpiCard("Deals created (in area)", dealsInArea, pct(dealsInArea, hasDeal || 1) + " of all deals")}
+        ${kpiCard("Deals in area", dealsInArea, pct(dealsInArea, hasDeal || 1) + " of lead-linked deals")}
         <div class="kpi" style="border-left:4px solid #B91C1C;">
           <div class="label">Out of area (unqualified)</div>
           <div class="value">${outOfArea.toLocaleString()}</div>

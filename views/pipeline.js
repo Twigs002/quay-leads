@@ -37,9 +37,7 @@ function _econRand(v) {
 // is NOT a Meta source and whose deal was auto-created belongs to the Dialfire
 // calling pipe; everything else is the Seller Lead Bank sheet book.
 function _econChannel(l) {
-  if (l && STAGES.isMetaSource(l.source)) return "Meta / Facebook";
-  if (l && l.deal_creation === "auto") return "Dialfire";
-  return "Seller Lead Bank";
+  return { meta: "Meta / Facebook", dialfire: "Dialfire", slb: "Seller Lead Bank" }[STAGES.leadChannel(l)];
 }
 window.VIEWS.pipeline = function (root, ctx) {
   const leads = ctx.view.leads;
@@ -582,7 +580,7 @@ window.VIEWS.pipeline = function (root, ctx) {
             <th class="num">Hot</th>
             <th class="num">Warm</th>
             <th class="num">Nurture</th>
-            <th class="num">Deals created</th>
+            <th class="num">Deals (linked)</th>
             <th class="num">No deal</th>
             <th class="num">Other / unmapped</th>
           </tr></thead>

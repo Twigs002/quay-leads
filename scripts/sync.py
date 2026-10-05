@@ -32,7 +32,8 @@ import re
 import sys
 import time
 import traceback
-from datetime import datetime, timezone
+from collections import Counter, defaultdict
+from datetime import datetime, timezone, timedelta
 from typing import Iterable
 from zoneinfo import ZoneInfo
 
@@ -56,6 +57,10 @@ HS_PROPS = [
 ]
 BATCH = 100
 THROTTLE_S = 0.35  # ~3 req/s — well under HubSpot's 10/s sustained
+# The whole-book deal ingest is NET-NEW bulk load; throttle it hard (1 req / 10s)
+# per the owner's explicit rate-limit rule so it can never contend for the token.
+DEALS_THROTTLE_S = 10.0
+DEALS_LOOKBACK_MONTHS = 12
 SHEET_ID_DEFAULT = "1-36ANzAzzi5N0vmLG0hAVkBnFkhkFCh4fGXFenlexe0"
 DEAL_RE = re.compile(r"DealID:\s*(\d+)", re.IGNORECASE)
 
@@ -154,10 +159,10 @@ def hs_session() -> requests.Session:
 
 
 # ── HubSpot HTTP w/ throttle + 429 back-off ─────────────────────────────
-def hs_request(sess: requests.Session, method: str, url: str, **kwargs):
+def hs_request(sess: requests.Session, method: str, url: str, throttle: float = THROTTLE_S, **kwargs):
     backoff = 1
     for _ in range(6):
-        time.sleep(THROTTLE_S)
+        time.sleep(throttle)
         r = sess.request(method, url, timeout=30, **kwargs)
         if r.status_code == 429:
             wait = int(r.headers.get("Retry-After", backoff))
@@ -531,6 +536,89 @@ def fetch_pipeline_value_by_stage(sess: requests.Session, labels: dict[str, str]
     } for sid, a in agg.items() if sid]
 
 
+def build_owner_team(leads: list[dict]) -> dict[str, str]:
+    """owner_id → team (lowercased), by majority vote over the leads sheet's
+    (HubspotDivID, Division) pairs. Mirrors the DB owner_team_for() function so
+    the whole-book deal count attributes to teams the same way the dashboard
+    scopes rows. Blank / 'UPDATED BELOW' divisions don't vote."""
+    votes: dict[str, Counter] = defaultdict(Counter)
+    for l in leads:
+        oid = l.get("hubspot_div_id")
+        d = (l.get("division") or "").strip()
+        if not oid or not d or d.upper() == "UPDATED BELOW":
+            continue
+        votes[oid][d.lower()] += 1
+    return {oid: c.most_common(1)[0][0] for oid, c in votes.items()}
+
+
+def _month_windows(months: int, now: datetime) -> list[tuple[int, int]]:
+    """Return [(start_ms, end_ms), ...] for the last `months` calendar-ish
+    windows ending at `now`, each ~30 days. Windowing keeps every HubSpot Search
+    page well under the API's hard 10,000-result cap."""
+    out: list[tuple[int, int]] = []
+    end = now
+    for _ in range(months):
+        start = end - timedelta(days=30)
+        out.append((int(start.timestamp() * 1000), int(end.timestamp() * 1000)))
+        end = start
+    return out
+
+
+def fetch_all_deals(sess: requests.Session, labels: dict[str, str], owner_team: dict[str, str]) -> list[dict]:
+    """Whole default-pipeline deal book for the last DEALS_LOOKBACK_MONTHS, by
+    createdate — independent of the lead sheet. Feeds hs_deals_all so the COO can
+    see a true 'Deals created (HubSpot)' per-team count that reconciles with
+    HubSpot. Throttled at DEALS_THROTTLE_S (1 req / 10s). Windowed by ~month to
+    stay under the Search API's 10k cap. Best-effort: returns [] on error."""
+    url = f"{HS_API}/crm/v3/objects/deals/search"
+    props = ["dealstage", "createdate", "hubspot_owner_id", "pipeline", "amount", "hs_is_closed", "closedate"]
+    now_iso = datetime.now(timezone.utc).isoformat()
+    by_id: dict[str, dict] = {}
+    try:
+        for start_ms, end_ms in _month_windows(DEALS_LOOKBACK_MONTHS, datetime.now(timezone.utc)):
+            after: str | None = None
+            while True:
+                body = {
+                    "filterGroups": [{"filters": [
+                        {"propertyName": "pipeline", "operator": "EQ", "value": "default"},
+                        {"propertyName": "createdate", "operator": "GTE", "value": str(start_ms)},
+                        {"propertyName": "createdate", "operator": "LT", "value": str(end_ms)},
+                    ]}],
+                    "sorts": [{"propertyName": "createdate", "direction": "ASCENDING"}],
+                    "properties": props,
+                    "limit": 100,
+                }
+                if after:
+                    body["after"] = after
+                data = hs_request(sess, "POST", url, json=body, throttle=DEALS_THROTTLE_S)
+                for rec in (data or {}).get("results", []):
+                    p = rec.get("properties") or {}
+                    did = str(rec.get("id") or "")
+                    if not did:
+                        continue
+                    oid = p.get("hubspot_owner_id")
+                    by_id[did] = {
+                        "deal_id":          did,
+                        "pipeline":         p.get("pipeline"),
+                        "dealstage":        p.get("dealstage"),
+                        "stage_label":      labels.get(p.get("dealstage"), p.get("dealstage")),
+                        "amount":           _to_float(p.get("amount")),
+                        "hubspot_owner_id": oid,
+                        "team":             owner_team.get(oid) if oid else None,
+                        "createdate":       _to_ts(p.get("createdate")),
+                        "close_date":       _to_ts(p.get("closedate")),
+                        "is_closed":        (p.get("hs_is_closed") == "true"),
+                        "refreshed_at":     now_iso,
+                    }
+                after = (((data or {}).get("paging") or {}).get("next") or {}).get("after")
+                if not after:
+                    break
+    except Exception as exc:  # noqa: BLE001 - additive; must never sink the core sync
+        print(f"  ! fetch_all_deals skipped: {exc}")
+        return []
+    return list(by_id.values())
+
+
 def fetch_call_counts(sess: requests.Session, deal_ids: Iterable[str]) -> tuple[dict[str, int], dict[str, list[str]], set[str]]:
     """Return ({deal_id: count}, {deal_id: [call_id, ...]}, failed_ids).
 
@@ -805,6 +893,24 @@ def main():
             print(f"  ! sales_register step skipped: {exc}")
             try:
                 heartbeat(sb, "sales_register_sync", ok=False, message=str(exc)[:500])
+            except Exception:
+                pass
+
+        # Whole-book HubSpot deal register (true "Deals created (HubSpot)" per
+        # team) → hs_deals_all. Net-new bulk HubSpot load, throttled at 1 req/10s;
+        # self-contained so a failure or rate-limit here never sinks the core sync.
+        try:
+            print("→ fetching whole-book deals (last 12m, throttled 1 req/10s)")
+            owner_team = build_owner_team(leads)
+            all_deals = fetch_all_deals(sess, labels, owner_team)
+            if all_deals:
+                n_all = upsert_chunked(sb, "hs_deals_all", all_deals, on_conflict="deal_id")
+                print(f"  hs_deals_all rows: {n_all:,}")
+                heartbeat(sb, "hs_deals_all_sync", ok=True, message=f"{n_all} deals")
+        except Exception as exc:  # noqa: BLE001
+            print(f"  ! hs_deals_all step skipped: {exc}")
+            try:
+                heartbeat(sb, "hs_deals_all_sync", ok=False, message=str(exc)[:500])
             except Exception:
                 pass
 

@@ -23,9 +23,10 @@ concurrency:
 jobs:
   sync:
     runs-on: ubuntu-latest
-    # 20 min covers normal 3-day incremental runs (~1 min).
-    # First-run backfill of 45 days can take ~40 min — hence 60.
-    timeout-minutes: 60
+    # At the owner-requested 1 req/10s throttle a full run (incl. whole-book deal
+    # ingest) takes ~2-3h; 240 gives headroom. Drop back to 60 when HS_THROTTLE_S
+    # is restored to ~0.35 (fast runs finish in ~1-2 min).
+    timeout-minutes: 240
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

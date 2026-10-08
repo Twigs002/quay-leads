@@ -567,14 +567,25 @@ def _month_windows(months: int, now: datetime) -> list[tuple[int, int]]:
     return out
 
 
-def fetch_all_deals(sess: requests.Session, labels: dict[str, str], owner_team: dict[str, str]) -> list[dict]:
+def fetch_all_deals(sess: requests.Session, labels: dict[str, str], owner_team: dict[str, str],
+                    sheet_deal_ids: set[str]) -> list[dict]:
     """Whole default-pipeline deal book for the last DEALS_LOOKBACK_MONTHS, by
     createdate — independent of the lead sheet. Feeds hs_deals_all so the COO can
     see a true 'Deals created (HubSpot)' per-team count that reconciles with
-    HubSpot. Throttled at DEALS_THROTTLE_S (1 req / 10s). Windowed by ~month to
-    stay under the Search API's 10k cap. Best-effort: returns [] on error."""
+    HubSpot, and the All Leads bank its source split. Throttled at
+    DEALS_THROTTLE_S (1 req / 10s). Windowed by ~month to stay under the Search
+    API's 10k cap. Best-effort: returns [] on error.
+
+    Each deal is also tagged with its input channel (source):
+      • team     — broker-created in the CRM (hs_object_source_label = CRM_UI)
+      • slb      — lead sits on the Seller Lead Bank sheet (deal_id in sheet_deal_ids)
+      • dialfire — remaining auto/integration deal (the cold-call n8n pipe)
+      • other    — anything else
+    and with created_by_team (creator resolved via the owner→team vote) so the
+    team-created channel attributes to the creating team, not the owner."""
     url = f"{HS_API}/crm/v3/objects/deals/search"
-    props = ["dealstage", "createdate", "hubspot_owner_id", "pipeline", "amount", "hs_is_closed", "closedate"]
+    props = ["dealstage", "createdate", "hubspot_owner_id", "pipeline", "amount",
+             "hs_is_closed", "closedate", "hs_object_source_label", "hs_created_by_user_id"]
     now_iso = datetime.now(timezone.utc).isoformat()
     by_id: dict[str, dict] = {}
     try:
@@ -600,18 +611,38 @@ def fetch_all_deals(sess: requests.Session, labels: dict[str, str], owner_team: 
                     if not did:
                         continue
                     oid = p.get("hubspot_owner_id")
+                    cby = p.get("hs_created_by_user_id")
+                    src_label = p.get("hs_object_source_label")
+                    # Resolve the input channel. A broker-created deal (CRM_UI) is
+                    # always 'team'; otherwise a deal whose lead sits on the Seller
+                    # Lead Bank sheet is 'slb'; a remaining auto/integration deal is
+                    # the Dialfire cold-call pipe ('dialfire').
+                    if src_label == "CRM_UI":
+                        source = "team"
+                    elif did in sheet_deal_ids:
+                        source = "slb"
+                    elif src_label == "INTEGRATION":
+                        source = "dialfire"
+                    else:
+                        source = "other"
                     by_id[did] = {
-                        "deal_id":          did,
-                        "pipeline":         p.get("pipeline"),
-                        "dealstage":        p.get("dealstage"),
-                        "stage_label":      labels.get(p.get("dealstage"), p.get("dealstage")),
-                        "amount":           _to_float(p.get("amount")),
-                        "hubspot_owner_id": oid,
-                        "team":             owner_team.get(oid) if oid else None,
-                        "createdate":       _to_ts(p.get("createdate")),
-                        "close_date":       _to_ts(p.get("closedate")),
-                        "is_closed":        (p.get("hs_is_closed") == "true"),
-                        "refreshed_at":     now_iso,
+                        "deal_id":            did,
+                        "pipeline":           p.get("pipeline"),
+                        "dealstage":          p.get("dealstage"),
+                        "stage_label":        labels.get(p.get("dealstage"), p.get("dealstage")),
+                        "amount":             _to_float(p.get("amount")),
+                        "hubspot_owner_id":   oid,
+                        "team":               owner_team.get(oid) if oid else None,
+                        "source_label":       src_label,
+                        "created_by_user_id": cby,
+                        # Creator resolved to a team via the same owner→team vote
+                        # (user ids == owner ids for team users in this portal).
+                        "created_by_team":    owner_team.get(cby) if cby else None,
+                        "source":             source,
+                        "createdate":         _to_ts(p.get("createdate")),
+                        "close_date":         _to_ts(p.get("closedate")),
+                        "is_closed":          (p.get("hs_is_closed") == "true"),
+                        "refreshed_at":       now_iso,
                     }
                 after = (((data or {}).get("paging") or {}).get("next") or {}).get("after")
                 if not after:
@@ -905,7 +936,8 @@ def main():
         try:
             print("→ fetching whole-book deals (last 12m, throttled 1 req/10s)")
             owner_team = build_owner_team(leads)
-            all_deals = fetch_all_deals(sess, labels, owner_team)
+            sheet_deal_ids = {str(l["deal_id"]) for l in leads if l.get("deal_id")}
+            all_deals = fetch_all_deals(sess, labels, owner_team, sheet_deal_ids)
             if all_deals:
                 n_all = upsert_chunked(sb, "hs_deals_all", all_deals, on_conflict="deal_id")
                 print(f"  hs_deals_all rows: {n_all:,}")

@@ -1,10 +1,16 @@
 name: Sync leads → Supabase
 
-# Every 30 min + manual trigger. Sync ~12k rows + ~3k HubSpot enrichments
-# in ~1-2 minutes well under HubSpot rate limits.
+# Hourly at :13 + manual trigger. Sync ~12k rows + ~3k HubSpot enrichments.
+# Deliberately skips 04:00-07:59 UTC (06:00-10:00 SAST): under the conservative
+# 1 req/10s throttle a run is long and serialized, and when one landed in the
+# 08:29 SAST (06:29 UTC) window it collided with the n8n morning burst and
+# tripped HubSpot's portal-wide secondary (burst) rate limit, 429-ing n8n
+# (Caller QC, deal creation, Mailchimp, WhatsApp). The 4h gap (last start 03:13
+# UTC, next 08:13 UTC) keeps the SA morning clear even for a multi-hour full
+# run; :13 stays off the busy :00/:30 marks.
 on:
   schedule:
-    - cron: '0,30 * * * *'
+    - cron: '13 0-3,8-23 * * *'
   workflow_dispatch:
     inputs:
       reason:

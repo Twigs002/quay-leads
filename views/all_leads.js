@@ -52,8 +52,14 @@ window.VIEWS["all-leads"] = function (root, ctx) {
   const teamLc = (fstate.divisions && fstate.divisions.size)
     ? new Set([...fstate.divisions].map((x) => (x || "").toLowerCase())) : null;
   const inRange = (d) => d && (!fstate.from || d >= fstate.from) && (!fstate.to || d <= fstate.to);
-  const deals = allDeals.filter((d) =>
-    inRange(d.createdate_d) && (!teamLc || teamLc.has((teamOf(d) || "").toLowerCase())));
+  // Sidebar "Lead source" control (All / Dialfire / Seller Lead Bank / Broker
+  // deals) maps straight onto hs_deals_all.source for the whole-book view.
+  const chanFilter = fstate.leadOrigin || null; // null | 'dialfire' | 'slb' | 'team'
+  const inScope = (d) =>
+    inRange(d.createdate_d) &&
+    (!teamLc || teamLc.has((teamOf(d) || "").toLowerCase())) &&
+    (!chanFilter || channel(d) === chanFilter);
+  const deals = allDeals.filter(inScope);
 
   // Split rentals out of the "sales" book up front — they are their own line.
   const rentals = deals.filter(isRental);
@@ -75,6 +81,7 @@ window.VIEWS["all-leads"] = function (root, ctx) {
   for (const d of allDeals) {
     if (!d.createdate_d) continue;
     if (teamLc && !teamLc.has((teamOf(d) || "").toLowerCase())) continue;
+    if (chanFilter && channel(d) !== chanFilter) continue;
     const key = d.createdate_d.toISOString().slice(0, 7);
     let m = byMonth.get(key);
     if (!m) { m = { total: 0, worked: 0, rental: 0, dialfire: 0, slb: 0, team: 0, other: 0 }; byMonth.set(key, m); }
@@ -129,7 +136,7 @@ window.VIEWS["all-leads"] = function (root, ctx) {
       <p class="section-caption">Where each lead came into the company. Sales book only — rentals shown separately above.</p>
       <div class="kpis" style="margin-top:4px;">
         ${kpiCard("Dialfire", chanCounts.dialfire, "cold-call pipe", T.blue)}
-        ${kpiCard("Team created", chanCounts.team, "broker-created (CRM)", T.yellowDeep)}
+        ${kpiCard("Broker deals", chanCounts.team, "broker-created (CRM)", T.yellowDeep)}
         ${kpiCard("Seller Lead Bank", chanCounts.slb, "inbound on the sheet", T.green)}
         ${chanCounts.other ? kpiCard("Other", chanCounts.other, "uncategorised") : ""}
       </div>
@@ -157,7 +164,7 @@ window.VIEWS["all-leads"] = function (root, ctx) {
 
   // Channel donut (sales book, selected range).
   if (sourceKnown && (chanCounts.dialfire + chanCounts.team + chanCounts.slb + chanCounts.other) > 0) {
-    const labels = ["Dialfire", "Team created", "Seller Lead Bank", "Other"];
+    const labels = ["Dialfire", "Broker deals", "Seller Lead Bank", "Other"];
     const vals = [chanCounts.dialfire, chanCounts.team, chanCounts.slb, chanCounts.other];
     const colors = [col.dialfire, col.team, col.slb, col.other];
     Plotly.newPlot("al-channel-chart", [{
@@ -172,7 +179,7 @@ window.VIEWS["all-leads"] = function (root, ctx) {
   // Monthly stacked bars by channel + worked-lead line.
   const x = months.map(monthLabel);
   const chKeys = ["dialfire", "team", "slb", "other"];
-  const chName = { dialfire: "Dialfire", team: "Team created", slb: "Seller Lead Bank", other: "Other" };
+  const chName = { dialfire: "Dialfire", team: "Broker deals", slb: "Seller Lead Bank", other: "Other" };
   const traces = chKeys.map((k) => ({
     type: "bar", name: chName[k], x, y: months.map((mk) => byMonth.get(mk)[k] || 0),
     marker: { color: col[k] },

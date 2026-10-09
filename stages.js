@@ -143,12 +143,15 @@ window.STAGES = (() => {
   function isLost(stage)      { return COMPETITOR_LOST.has(stage); }
   // Single source of truth for which acquisition channel a lead belongs to.
   // Meta is its OWN channel (we paid Meta for the lead) even when the n8n pipe
-  // later auto-created its deal — so a Meta lead is never "Dialfire". Only a
-  // non-Meta, auto-created deal is Dialfire; everything else is the Seller Lead
-  // Bank sheet book. Mirrored by pipeline._econChannel and the sidebar filter.
+  // later auto-created its deal — so a Meta lead is never "Dialfire". A non-Meta
+  // auto-created deal is Dialfire (the cold-call pipe); a manually CRM-created
+  // deal is "team" (a broker made it themselves — "broker deals"); everything
+  // else is the Seller Lead Bank inbound sheet book. Mirrored by
+  // pipeline._econChannel, the All Leads view, and the sidebar filter.
   function leadChannel(l) {
     if (l && isMetaSource(l.source)) return "meta";
     if (l && l.deal_creation === "auto") return "dialfire";
+    if (l && l.deal_creation === "manual") return "team";
     return "slb";
   }
 

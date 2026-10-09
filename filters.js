@@ -271,6 +271,8 @@ window.FILTERS = (() => {
       // channel panel (pipeline._econChannel).
       if (state.leadOrigin === "dialfire" && STAGES.leadChannel(l) !== "dialfire") return false;
       if (state.leadOrigin === "slb" && STAGES.leadChannel(l) !== "slb") return false;
+      // "Broker deals" = a broker created the deal themselves (manual/CRM_UI).
+      if (state.leadOrigin === "team" && STAGES.leadChannel(l) !== "team") return false;
       return true;
     });
   }

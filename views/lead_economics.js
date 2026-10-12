@@ -107,13 +107,19 @@ window.VIEWS["lead-economics"] = function (root, ctx) {
   const byOrigin = { Dialfire: { n: 0, comm: 0 }, Meta: { n: 0, comm: 0 }, "Seller Lead Bank": { n: 0, comm: 0 } };
   for (const r of soldRows) { const b = byOrigin[r.origin]; if (b) { b.n++; b.comm += r.comm; } }
 
+  // Fallen-through deals are not sales, so they are kept OUT of the attribution
+  // table below and surfaced only as a headline count (over the date range).
+  const FELL_THROUGH = /FALLEN_THROUGH/;
+  const fellThroughCount = sales.filter((d) => FELL_THROUGH.test(d.deal_status || "")).length;
+
   // ── Attribution detail (matched register rows) ────────────────────────────
   // Attribution detail, with garbage register rows dropped: a future deal date
   // (not a real transfer yet) or a token commission under R100 (a placeholder
   // stub, e.g. the bogus R11 "1 Buh Rein Drive" row matched to a dead deal) must
-  // never show as an attributed sale.
+  // never show as an attributed sale; nor do fallen-through deals (see above).
   const matched = sales.filter((d) => {
     if (!d.lead_matched) return false;
+    if (FELL_THROUGH.test(d.deal_status || "")) return false;
     if (d.deal_date_d && d.deal_date_d > _now) return false;
     const gc = num(d.total_gross_comm);
     if (gc > 0 && gc < 100) return false;
@@ -199,6 +205,7 @@ window.VIEWS["lead-economics"] = function (root, ctx) {
         ${card("Commission from them", randS(trackedComm), "total agency commission", green)}
         ${card("Dialfire", randS(byOrigin.Dialfire.comm), `${grp(byOrigin.Dialfire.n)} sold`, blue)}
         ${card("Meta + Seller Lead Bank", randS(byOrigin.Meta.comm + byOrigin["Seller Lead Bank"].comm), `${grp(byOrigin.Meta.n + byOrigin["Seller Lead Bank"].n)} sold`, yellow)}
+        ${card("Fell through", grp(fellThroughCount), "register deals that fell through, in range", red)}
       </div>
     </section>
 

@@ -39,6 +39,9 @@ function _econRand(v) {
 // (shown in the "Channel volumes (whole book)" table), so "Dialfire" is kept in
 // the map only for safety and never appears from sheet leads.
 function _econChannel(l) {
+  // Mapped whole-book deals carry an explicit display channel (STAGES.leadChannel
+  // only classifies SHEET leads and never yields Dialfire), so honour it first.
+  if (l && l._econChan) return l._econChan;
   return { meta: "Seller Lead Bank", dialfire: "Dialfire", team: "Broker deals", slb: "Seller Lead Bank" }[STAGES.leadChannel(l)];
 }
 // Per-lead ACQUISITION cost by REAL source, decoupled from the display channel
@@ -53,7 +56,6 @@ function _econLeadCost(l, costs) {
   return undefined;
 }
 window.VIEWS.pipeline = function (root, ctx) {
-  const leads = ctx.view.leads;
   const { escapeHtml, escapeAttr, emptyState } = UTILS;
 
   // ── Whole-book channel volumes (hs_deals_all) ───────────────────────────────
@@ -115,35 +117,76 @@ window.VIEWS.pipeline = function (root, ctx) {
   }
   function channelVolSection() {
     if (!wbAvail) return "";
+    const below = isWholeBook
+      ? "the economics below now run on these whole-book deals for the selected channel"
+      : "the lead-cost economics below are the Seller Lead Bank sheet view";
     return `
       <section class="card">
         <h3>Channel volumes (whole book)</h3>
-        <p class="section-caption">Deals created in HubSpot over the current date range and divisions, by channel - the only place Dialfire and Broker deals exist (the lead-cost economics below are the Seller Lead Bank sheet view). <strong>Worked</strong> = reached Lead to Nurture; rentals excluded. Media spend: Dialfire = deals x the Dialfire cost set below, Broker has no media cost, and Seller Lead Bank spend (incl. Meta) is in the ROI table below. Banked commission is not traced per whole-book deal here.</p>
+        <p class="section-caption">Deals created in HubSpot over the current date range and divisions, by channel - the only place Dialfire and Broker deals exist (${below}). <strong>Worked</strong> = reached Lead to Nurture; rentals excluded. Media spend: Dialfire = deals x the Dialfire cost set below, Broker has no media cost, and Seller Lead Bank spend (incl. Meta) is in the ROI table below. Banked commission is not traced per whole-book deal here.</p>
         <div id="channel-vol-block">${channelVolHtml()}</div>
       </section>`;
   }
 
+  // ── The universe the Pipeline economics run on ──────────────────────────────
+  // All / Seller Lead Bank keep running on the sheet leads (ctx.view.leads) so
+  // those numbers are unchanged. Dialfire and Broker deals never reach the sheet,
+  // so for those origins the universe is built from the whole book: deals in that
+  // channel, scoped by the sidebar date range (createdate_d) + divisions, rentals
+  // excluded (so the funnel/stage counts reconcile with the Channel volumes table
+  // above), each mapped into the lead-shape the existing sections expect. Every
+  // other section below then runs unchanged on this universe.
+  const leadOrigin = (window.FILTERS && FILTERS.state && FILTERS.state.leadOrigin) || null;
+  const isWholeBook = (leadOrigin === "dialfire" || leadOrigin === "team") && wbAvail;
+  // Map a whole-book deal into a sheet-lead-shaped object. Field gaps the whole
+  // book does not carry are degraded safely: probability -> null (stage bar shows
+  // counts, blank win %), num_calls -> null (no call data), worked -> a Nurture
+  // proxy (no logged-call signal in the whole book), division -> the attributed
+  // team (no client-side team->division map), is_lead -> Seller Lead so the
+  // seller-scoped By-division table populates.
+  function wbToLead(d) {
+    const ch = wbChannel(d);
+    return {
+      deal_id: d.deal_id,
+      current_stage: d.stage_label,
+      has_deal: true,
+      is_lead: "Seller Lead",
+      source: d.source,
+      deal_creation: ch === "dialfire" ? "auto" : (ch === "team" ? "manual" : "other"),
+      _econChan: ch === "dialfire" ? "Dialfire" : "Broker deals",
+      worked: d.stage_label === WB_NURTURE,
+      datestamp_d: d.createdate_d,
+      deal_created_d: d.createdate_d,
+      amount: d.amount,
+      probability: null,
+      num_calls: null,
+      division: wbTeamOf(d) || "(no team)",
+      team: d.team,
+      deal_name: d.deal_name || null,
+      hubspot_owner_id: d.hubspot_owner_id || null,
+      close_date: d.close_date,
+      is_closed: d.is_closed,
+    };
+  }
+  const leads = isWholeBook
+    ? wbDeals.filter((d) => wbChannel(d) === leadOrigin && _wbScope(d) && !WB_RENTAL.has(d.stage_label)).map(wbToLead)
+    : ctx.view.leads;
+  // Whole-book vs sheet wording for the division sections (whole-book "division"
+  // is really the attributed team - no client-side team->division map exists).
+  const DIV_NOTE = isWholeBook
+    ? ` <span class="muted small">(grouped by attributed team - the whole book carries no division)</span>` : "";
+
   if (!leads.length) {
-    // The sheet view is empty - e.g. the sidebar is on Dialfire or Broker deals,
-    // which have ~no sheet leads. Rather than a bare empty state, still show the
-    // whole-book channel volumes (which DO cover Dialfire / Broker) when available.
-    if (wbAvail) {
-      root.innerHTML = `<h2>Pipeline</h2>
-        <p class="lede">Whole-book deal volumes by channel. The sheet-based lead economics below need Seller Lead Bank or All.</p>
-        ${channelVolSection()}
-        <section class="card"><p class="muted small">The sheet-based Pipeline economics (lead cost, conversion funnel, HubSpot stage bar, division leaderboard) cover Seller Lead Bank + Meta leads, so they are empty for this selection. Set <strong>Lead source</strong> to All or Seller Lead Bank to see them.</p></section>`;
-      return;
-    }
     root.innerHTML = `<h2>Pipeline</h2>${emptyState()}`;
     return;
   }
 
   // ── Lead economics: source channels + qualified-stage set ─────────────
-  // Options are built from the whole book (ctx.cache.leads) so a source or a
-  // stage never disappears when the sidebar filters narrow things. The figures
-  // themselves are computed over the filtered view (leads = ctx.view.leads), so
-  // the panel moves with the sidebar date range and filters.
-  const allBook = (ctx.cache && ctx.cache.leads) || leads;
+  // Options are built from the whole sheet book (ctx.cache.leads) for All / SLB so
+  // a source or stage never disappears when the sidebar filters narrow things; for
+  // the whole-book Dialfire / Broker universe they come from that universe (its one
+  // channel + its stages). Figures are computed over the active `leads` universe.
+  const allBook = isWholeBook ? leads : ((ctx.cache && ctx.cache.leads) || leads);
   // Seed Meta at R80 the very first time only; after that the director owns
   // every figure (clearing a value sticks, we never re-seed over it).
   if (localStorage.getItem(__ECON_COST_LS) === null) {
@@ -641,7 +684,7 @@ window.VIEWS.pipeline = function (root, ctx) {
     </section>
 
     <section class="card">
-      <h3>By division</h3>
+      <h3>By division${DIV_NOTE}</h3>
       <p class="section-caption">
         Top 15 divisions by HubSpot stage (chart), then seller leads per division with their ranking.
         <strong>Worked</strong> = the seller lead's deal has >=1 logged call. <strong>Hot</strong> (tomorrow to 3 months),
@@ -672,7 +715,7 @@ window.VIEWS.pipeline = function (root, ctx) {
     </section>
 
     <section class="card">
-      <h3>Drill into a division</h3>
+      <h3>Drill into a division${DIV_NOTE}</h3>
       <label class="muted" style="font-size: 12px;">Division
         <select id="div-drill" style="margin-left: 8px; padding: 6px 10px; border-radius: 6px; border: 1px solid var(--line); font-family: var(--sans);">
           ${boardRows.map(r => `<option value="${escapeHtml(r.div)}">${escapeHtml(r.div)}</option>`).join("")}

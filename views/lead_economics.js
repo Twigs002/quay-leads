@@ -43,7 +43,10 @@ window.VIEWS["lead-economics"] = function (root, ctx) {
   const _from = _fs.from || null, _to = _fs.to || null;
   const _inRange = (d) => d && (!_from || d >= _from) && (!_to || d <= _to);
   const leads = (_from || _to) ? allLeads.filter((l) => _inRange(l.datestamp_d)) : allLeads;
-  const sales = (_from || _to) ? allSales.filter((d) => _inRange(d.deal_date_d)) : allSales;
+  // Exclude DUPLICATE register rows everywhere in this view - they are not real
+  // sales and must not inflate any count, match, or commission total.
+  const sales = allSales.filter((d) =>
+    (d.deal_status || "") !== "DUPLICATE" && (!(_from || _to) || _inRange(d.deal_date_d)));
 
   function card(label, value, sub, accent) {
     return `<div class="kpi"${accent ? ` style="border-left:4px solid ${accent};"` : ""}>

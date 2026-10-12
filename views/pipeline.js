@@ -30,28 +30,111 @@ function _econRand(v) {
   const s = Math.abs(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ");
   return "R" + (n < 0 ? "-" + s : s);
 }
-// Which paid channel a SHEET lead belongs to, by ACQUISITION SOURCE. A Meta /
-// Facebook / fb source is Meta - what we paid to acquire the lead. A manually
-// CRM-created deal is a Broker deal (a broker made it themselves); everything
-// else is the Seller Lead Bank sheet book. Sheet leads are never Dialfire - true
-// Dialfire cold-call leads live only in the whole deal book (see the All Leads
-// view + the Overview whole-book section), so "Dialfire" is kept in the map only
-// for safety and never appears from sheet leads. Mirrors STAGES.leadChannel.
+// DISPLAY channel for a SHEET lead. Meta / Facebook is folded into "Seller Lead
+// Bank" here (the Sources page keeps the Meta split); its R80-per-lead ACQUISITION
+// COST is preserved separately by _econLeadCost, so SLB spend still carries it -
+// the display just no longer breaks Meta out. A manually CRM-created deal is a
+// Broker deal; everything else is the Seller Lead Bank sheet book. Sheet leads are
+// never Dialfire - true Dialfire cold-call leads live only in the whole deal book
+// (shown in the "Channel volumes (whole book)" table), so "Dialfire" is kept in
+// the map only for safety and never appears from sheet leads.
 function _econChannel(l) {
-  return { meta: "Meta / Facebook", dialfire: "Dialfire", team: "Broker deals", slb: "Seller Lead Bank" }[STAGES.leadChannel(l)];
+  return { meta: "Seller Lead Bank", dialfire: "Dialfire", team: "Broker deals", slb: "Seller Lead Bank" }[STAGES.leadChannel(l)];
+}
+// Per-lead ACQUISITION cost by REAL source, decoupled from the display channel
+// above. Meta-sourced leads keep their editable Meta cost (seeded at R80) even
+// though they now display inside Seller Lead Bank; auto-created leads use the
+// editable Dialfire cost; every other sheet lead has no direct media cost.
+// `costs` is the _econLoadCosts() map. Returns undefined when no cost applies
+// (callers gate on Number.isFinite), so clearing a cost cleanly zeroes it.
+function _econLeadCost(l, costs) {
+  if (STAGES.isMetaSource(l.source)) return costs["Meta / Facebook"];
+  if (l.deal_creation === "auto") return costs["Dialfire"];
+  return undefined;
 }
 window.VIEWS.pipeline = function (root, ctx) {
   const leads = ctx.view.leads;
   const { escapeHtml, escapeAttr, emptyState } = UTILS;
+
+  // ── Whole-book channel volumes (hs_deals_all) ───────────────────────────────
+  // Dialfire and Broker deals exist ONLY in the whole HubSpot deal book, never on
+  // the Seller Lead Bank sheet, so the sheet-based economics below can never show
+  // them. Aggregate deal volumes per channel straight from allDeals - same
+  // channel / team / rental / worked helpers as the All Leads view - honouring the
+  // sidebar date range (createdate_d) + divisions. Rentals are excluded so the
+  // counts reconcile with the All Leads sales book. Computed before the empty-leads
+  // guard so it still renders when the sheet view is empty (Dialfire / Broker).
+  const wbDeals = (ctx.cache && ctx.cache.allDeals) || [];
+  const wbAvail = wbDeals.length > 0;
+  const _wbFs = (window.FILTERS && FILTERS.state) || {};
+  const WB_RENTAL = new Set(["Rental Lead", "Referred to Rentals"]);
+  const WB_NURTURE = (window.STAGES && STAGES.NURTURE) || "Contacted - Lead to Nurture";
+  const wbChannel = (d) => d.source ? d.source
+    : (d.source_label === "CRM_UI" ? "team" : (d.source_label === "INTEGRATION" ? "dialfire" : "other"));
+  const wbTeamOf = (d) => ((wbChannel(d) === "team" && d.created_by_team) ? d.created_by_team : d.team) || null;
+  const _wbTeamLc = (_wbFs.divisions && _wbFs.divisions.size)
+    ? new Set([..._wbFs.divisions].map((x) => (x || "").toLowerCase())) : null;
+  const _wbInRange = (d) => d && (!_wbFs.from || d >= _wbFs.from) && (!_wbFs.to || d <= _wbFs.to);
+  const _wbScope = (d) => _wbInRange(d.createdate_d)
+    && (!_wbTeamLc || _wbTeamLc.has((wbTeamOf(d) || "").toLowerCase()));
+  const wbAgg = { dialfire: { created: 0, worked: 0 }, team: { created: 0, worked: 0 }, slb: { created: 0, worked: 0 } };
+  for (const d of wbDeals) {
+    if (!_wbScope(d)) continue;
+    if (WB_RENTAL.has(d.stage_label)) continue;   // rentals are their own line, excluded here
+    const a = wbAgg[wbChannel(d)];
+    if (!a) continue;                             // skip 'other'
+    a.created++;
+    if (d.stage_label === WB_NURTURE) a.worked++;
+  }
+
+  // Channel-volumes table (whole book). Dialfire media spend = deals x the Dialfire
+  // cost set in the economics panel; Broker has no media cost; SLB spend (incl.
+  // Meta) lives in the sheet ROI table below. Banked commission is not traced per
+  // whole-book deal here (flagged in the caption). Re-rendered on a cost edit.
+  function channelVolHtml() {
+    const costs = _econLoadCosts();
+    const dfCost = costs["Dialfire"];
+    const ROWS = [
+      { key: "dialfire", label: "Dialfire", note: "cold-call pipe", cost: Number.isFinite(dfCost) ? dfCost : null },
+      { key: "team", label: "Broker deals", note: "broker-created (CRM)", cost: null },
+      { key: "slb", label: "Seller Lead Bank", note: "inbound (incl. Meta)", cost: null },
+    ];
+    const body = ROWS.map((r) => {
+      const a = wbAgg[r.key];
+      const spend = (r.cost != null) ? a.created * r.cost : null;
+      return `<tr>
+        <td>${r.label}<div class="muted small">${r.note}</div></td>
+        <td class="num">${a.created.toLocaleString()}</td>
+        <td class="num">${a.worked.toLocaleString()}</td>
+        <td class="num">${spend == null ? '<span class="muted">n/a</span>' : _econRand(spend)}</td>
+      </tr>`;
+    }).join("");
+    return `<div class="table-wrap"><table class="dt">
+      <thead><tr><th>Channel</th><th class="num">Deals created</th><th class="num">Worked (Nurture)</th><th class="num">Media spend</th></tr></thead>
+      <tbody>${body}</tbody></table></div>`;
+  }
+  function channelVolSection() {
+    if (!wbAvail) return "";
+    return `
+      <section class="card">
+        <h3>Channel volumes (whole book)</h3>
+        <p class="section-caption">Deals created in HubSpot over the current date range and divisions, by channel - the only place Dialfire and Broker deals exist (the lead-cost economics below are the Seller Lead Bank sheet view). <strong>Worked</strong> = reached Lead to Nurture; rentals excluded. Media spend: Dialfire = deals x the Dialfire cost set below, Broker has no media cost, and Seller Lead Bank spend (incl. Meta) is in the ROI table below. Banked commission is not traced per whole-book deal here.</p>
+        <div id="channel-vol-block">${channelVolHtml()}</div>
+      </section>`;
+  }
+
   if (!leads.length) {
-    // Dialfire / Broker are whole-book-only channels with ~no sheet leads, so the
-    // sheet-based Pipeline economics are empty for them. Say so and point to where
-    // those volumes actually live, instead of a bare "no leads" state.
-    const origin = (window.FILTERS && FILTERS.state && FILTERS.state.leadOrigin) || null;
-    const note = (origin === "dialfire" || origin === "team")
-      ? emptyState("Pipeline lead-economics cover Seller Lead Bank + Meta leads only. Dialfire and Broker whole-book deal volumes are on the All Leads tab and in the Sources \"Channel breakdown (whole book)\" section.")
-      : emptyState();
-    root.innerHTML = `<h2>Pipeline</h2>${note}`;
+    // The sheet view is empty - e.g. the sidebar is on Dialfire or Broker deals,
+    // which have ~no sheet leads. Rather than a bare empty state, still show the
+    // whole-book channel volumes (which DO cover Dialfire / Broker) when available.
+    if (wbAvail) {
+      root.innerHTML = `<h2>Pipeline</h2>
+        <p class="lede">Whole-book deal volumes by channel. The sheet-based lead economics below need Seller Lead Bank or All.</p>
+        ${channelVolSection()}
+        <section class="card"><p class="muted small">The sheet-based Pipeline economics (lead cost, conversion funnel, HubSpot stage bar, division leaderboard) cover Seller Lead Bank + Meta leads, so they are empty for this selection. Set <strong>Lead source</strong> to All or Seller Lead Bank to see them.</p></section>`;
+      return;
+    }
+    root.innerHTML = `<h2>Pipeline</h2>${emptyState()}`;
     return;
   }
 
@@ -66,7 +149,15 @@ window.VIEWS.pipeline = function (root, ctx) {
   if (localStorage.getItem(__ECON_COST_LS) === null) {
     _econSaveCost("Meta / Facebook", STAGES.META_COST_PER_LEAD);
   }
-  const ECON_CHANNEL_ORDER = ["Meta / Facebook", "Dialfire", "Broker deals", "Seller Lead Bank"];
+  const ECON_CHANNEL_ORDER = ["Dialfire", "Broker deals", "Seller Lead Bank"];
+  // Editable per-lead media costs. Decoupled from the display channels: Meta is
+  // folded into Seller Lead Bank for display but keeps its own editable cost row
+  // (the seeded R80), and Dialfire's cost drives the whole-book Dialfire media
+  // spend above. Broker deals have no media cost, so no row.
+  const ECON_COST_INPUTS = [
+    { key: "Meta / Facebook", label: "Meta leads (shown within Seller Lead Bank)" },
+    { key: "Dialfire", label: "Dialfire (whole-book cold-call pipe)" },
+  ];
   const econChannels = (() => {
     const seen = new Set();
     for (const l of allBook) seen.add(_econChannel(l));
@@ -103,12 +194,12 @@ window.VIEWS.pipeline = function (root, ctx) {
     // went to leads which became HubSpot deals.
     let spendAll = 0, costedLeads = 0;
     for (const l of leads) {
-      const c = costs[_econChannel(l)];
+      const c = _econLeadCost(l, costs);   // cost by REAL source (Meta R80 kept)
       if (Number.isFinite(c)) { spendAll += c; costedLeads++; }
     }
     let spendDeals = 0, selectedDeals = 0, costedDeals = 0;
     for (const d of deals) {
-      const c = costs[_econChannel(d)];
+      const c = _econLeadCost(d, costs);
       if (Number.isFinite(c)) { spendDeals += c; costedDeals++; }
       if (checked.has(d.current_stage || "Unknown stage")) selectedDeals++;
     }
@@ -160,14 +251,14 @@ window.VIEWS.pipeline = function (root, ctx) {
     const cpdSub = econCpdSub(e);
 
     const costs = _econLoadCosts();
-    const costRows = econChannels.map(c => {
-      const cv = Number.isFinite(costs[c]) ? costs[c] : "";
+    const costRows = ECON_COST_INPUTS.map(({ key, label }) => {
+      const cv = Number.isFinite(costs[key]) ? costs[key] : "";
       return `<label style="display:flex; align-items:center; gap:8px; font-size:13px;">
         <span class="muted" style="flex:0 0 auto;">R</span>
-        <input type="text" inputmode="numeric" data-econ-cost="${escapeAttr(c)}" value="${escapeAttr(String(cv))}"
+        <input type="text" inputmode="numeric" data-econ-cost="${escapeAttr(key)}" value="${escapeAttr(String(cv))}"
                placeholder="enter"
                style="width:96px; padding:6px 8px; border:1px solid var(--line); border-radius:8px; font:inherit; text-align:right; font-variant-numeric:tabular-nums;">
-        <span>${escapeHtml(c)}</span>
+        <span>${escapeHtml(label)}</span>
       </label>`;
     }).join("");
     const stageRows = econStages.map(s => {
@@ -258,6 +349,7 @@ window.VIEWS.pipeline = function (root, ctx) {
         _econSaveCost(inp.dataset.econCost, raw === "" ? null : Number(raw));
         econRecalc();
         drawRoi();          // spend (and so ROI) depends on the per-lead cost
+        drawChannelVol();   // Dialfire whole-book media spend tracks its cost too
       });
     });
     root.querySelectorAll("[data-econ-stage]").forEach(cb => {
@@ -355,7 +447,9 @@ window.VIEWS.pipeline = function (root, ctx) {
   const cOther = dealLeads.filter(l => l.deal_creation === "other").length;
   const cPct = n => dealLeads.length ? Math.round(n / dealLeads.length * 100) + "%" : "0%";
 
-  // Division leaderboard
+  // Per-division aggregates (leads / worked / deals). Feeds the per-division
+  // stage breakdown chart, the drill picker and divDrillSet below - the Division
+  // leaderboard table that used to render these was removed.
   const board = {};
   for (const l of leads) {
     if (!l.division) continue;
@@ -364,10 +458,11 @@ window.VIEWS.pipeline = function (root, ctx) {
     if (l.worked) board[l.division].worked++;
     if (l.has_deal) board[l.division].deals++;
   }
+  // div + leads/worked/deals, sorted by volume. Drives topDivs, the per-division
+  // breakdown chart, the drill picker and divDrillSet. (The old worked%/deal%
+  // fields were only for the removed Division leaderboard, so they are gone.)
   const boardRows = Object.entries(board).map(([k, v]) => ({
     div: k, ...v,
-    workedPct: v.leads ? (v.worked / v.leads * 100) : 0,
-    dealPct:   v.leads ? (v.deals / v.leads * 100) : 0,
   })).sort((a, b) => b.leads - a.leads);
 
   const topDivs = boardRows.slice(0, 15).map(r => r.div);
@@ -395,20 +490,23 @@ window.VIEWS.pipeline = function (root, ctx) {
     marker: { color: cmapDiv[stage] },
   }));
 
-  // ── Seller leads by division (summary table) ────────────────────────────
+  // ── By division (summary table) ─────────────────────────────────────────
   // Seller leads only, over the current filtered view (respects the sidebar).
-  // Hot / Warm / Nurture are HubSpot DEAL stages (current_stage); "Other" is
-  // every seller lead not in those three (incl. no-deal and other stages) so
-  // Hot + Warm + Nurture + Other reconciles exactly to Seller leads. Deals
-  // created / No deal are an orthogonal has-deal split.
+  // Worked = the seller lead's HubSpot deal has >=1 logged call (the ranking
+  // measure the old Division leaderboard carried). Hot / Warm / Nurture are
+  // HubSpot DEAL stages (current_stage); "Other" is every seller lead not in
+  // those three (incl. no-deal and other stages) so Hot + Warm + Nurture + Other
+  // reconciles exactly to Seller leads. Deals created / No deal are an orthogonal
+  // has-deal split. Pairs with the division x stage chart in the same section.
   const sellerLeads = leads.filter(l => l.is_lead === "Seller Lead");
   const divDrillSet = new Set(boardRows.map(r => r.div));   // divisions the drill can open
   const _divKey = l => l.division || "(no division)";   // match board/drill keys exactly
   const sellerDiv = {};
   for (const l of sellerLeads) {
     const k = _divKey(l);
-    const d = sellerDiv[k] || (sellerDiv[k] = { div: k, sellers: 0, hot: 0, warm: 0, nurture: 0, other: 0, deals: 0, noDeal: 0 });
+    const d = sellerDiv[k] || (sellerDiv[k] = { div: k, sellers: 0, worked: 0, hot: 0, warm: 0, nurture: 0, other: 0, deals: 0, noDeal: 0 });
     d.sellers++;
+    if (l.worked) d.worked++;
     const st = l.current_stage;
     if (STAGES.isHot(st)) d.hot++;
     else if (STAGES.isWarm(st)) d.warm++;
@@ -418,9 +516,9 @@ window.VIEWS.pipeline = function (root, ctx) {
   }
   const sellerDivRows = Object.values(sellerDiv).sort((a, b) => b.sellers - a.sellers);
   const sellerTot = sellerDivRows.reduce((t, r) => {
-    for (const k of ["sellers", "hot", "warm", "nurture", "other", "deals", "noDeal"]) t[k] += r[k];
+    for (const k of ["sellers", "worked", "hot", "warm", "nurture", "other", "deals", "noDeal"]) t[k] += r[k];
     return t;
-  }, { sellers: 0, hot: 0, warm: 0, nurture: 0, other: 0, deals: 0, noDeal: 0 });
+  }, { sellers: 0, worked: 0, hot: 0, warm: 0, nurture: 0, other: 0, deals: 0, noDeal: 0 });
   const sellerSummaryRow = (r, isTotal) => {
     const clickable = !isTotal && divDrillSet.has(r.div);
     const attrs = clickable
@@ -431,6 +529,7 @@ window.VIEWS.pipeline = function (root, ctx) {
     return `<tr${attrs}>
       <td>${name}</td>
       <td class="num">${r.sellers.toLocaleString()}</td>
+      <td class="num">${r.worked.toLocaleString()}</td>
       <td class="num">${r.hot.toLocaleString()}</td>
       <td class="num">${r.warm.toLocaleString()}</td>
       <td class="num">${r.nurture.toLocaleString()}</td>
@@ -449,6 +548,8 @@ window.VIEWS.pipeline = function (root, ctx) {
     <p class="lede">How leads convert from inbound → qualified → deal → worked (call logged).</p>
 
     ${econPanelHtml()}
+
+    ${channelVolSection()}
 
     <section class="card">
       <h3>Return on investment</h3>
@@ -539,52 +640,23 @@ window.VIEWS.pipeline = function (root, ctx) {
       </div>`}
     </section>
 
-    <section>
-      <h3>Division leaderboard</h3>
-      <p class="section-caption"><strong>Worked</strong> = HubSpot deal has ≥1 logged call.</p>
-      <div class="table-wrap">
-        <table class="dt">
-          <thead><tr>
-            <th>Division</th>
-            <th class="num">Leads</th>
-            <th class="num">Worked</th>
-            <th class="num">Deals</th>
-            <th>Worked %</th>
-            <th>Deal %</th>
-          </tr></thead>
-          <tbody>${boardRows.map(r => `
-            <tr>
-              <td>${escapeHtml(r.div)}</td>
-              <td class="num">${r.leads.toLocaleString()}</td>
-              <td class="num">${r.worked.toLocaleString()}</td>
-              <td class="num">${r.deals.toLocaleString()}</td>
-              <td>${barCell(r.workedPct)}</td>
-              <td>${barCell(r.dealPct)}</td>
-            </tr>`).join("")}
-          </tbody>
-        </table>
-      </div>
-    </section>
-
     <section class="card">
-      <h3>Where each division's leads sit</h3>
-      <p class="section-caption">Top 15 divisions × HubSpot stages. <strong>Hot Lead</strong> is bright red; <strong>No deal yet</strong> is muted slate.</p>
-      <div id="breakdown-chart" style="height: ${Math.max(420, 32 * topDivs.length + 80)}px;"></div>
-    </section>
-
-    <section class="card">
-      <h3>Seller leads by division</h3>
+      <h3>By division</h3>
       <p class="section-caption">
-        Seller leads only, over the current filters. <strong>Hot</strong> (tomorrow to 3 months),
-        <strong>Warm</strong> (3 - 6 months) and <strong>Nurture</strong> (6 - 12 months) are HubSpot deal stages.
+        Top 15 divisions by HubSpot stage (chart), then seller leads per division with their ranking.
+        <strong>Worked</strong> = the seller lead's deal has >=1 logged call. <strong>Hot</strong> (tomorrow to 3 months),
+        <strong>Warm</strong> (3 - 6 months) and <strong>Nurture</strong> (6 - 12 months) are HubSpot deal stages;
         <strong>Other / unmapped</strong> = every seller lead not in those three (includes no-deal and other stages),
-        so Hot + Warm + Nurture + Other equals Seller leads. Click a division to open it in the drill below.
+        so Hot + Warm + Nurture + Other equals Seller leads. <strong>Hot Lead</strong> is bright red in the chart;
+        <strong>No deal yet</strong> is muted slate. Click a division row to open it in the drill below.
       </p>
-      <div class="table-wrap">
+      <div id="breakdown-chart" style="height: ${Math.max(420, 32 * topDivs.length + 80)}px;"></div>
+      <div class="table-wrap" style="margin-top:12px;">
         <table class="dt">
           <thead><tr>
             <th>Division</th>
             <th class="num">Seller leads</th>
+            <th class="num">Worked</th>
             <th class="num">Hot</th>
             <th class="num">Warm</th>
             <th class="num">Nurture</th>
@@ -593,7 +665,7 @@ window.VIEWS.pipeline = function (root, ctx) {
             <th class="num">Other / unmapped</th>
           </tr></thead>
           <tbody>${sellerDivRows.map(r => sellerSummaryRow(r, false)).join("")
-            || `<tr><td colspan="8" class="muted" style="padding:14px;">No seller leads in the current filters.</td></tr>`}
+            || `<tr><td colspan="9" class="muted" style="padding:14px;">No seller leads in the current filters.</td></tr>`}
           ${sellerDivRows.length ? sellerSummaryRow(sellerTot, true) : ""}</tbody>
         </table>
       </div>
@@ -695,12 +767,23 @@ window.VIEWS.pipeline = function (root, ctx) {
     const block = document.getElementById("roi-block");
     if (!block) return;
     const costs = _econLoadCosts();
+    // Spend per display channel = sum of each lead's REAL-source cost, so a Meta
+    // lead's R80 lands in Seller Lead Bank (Meta is folded into SLB for display).
+    // Recomputed here because it tracks the editable per-lead costs.
+    const spendByChannel = {};
+    for (const c of econChannels) spendByChannel[c] = { spend: 0, costed: 0 };
+    for (const l of leads) {
+      const sb = spendByChannel[_econChannel(l)];
+      if (!sb) continue;
+      const c = _econLeadCost(l, costs);
+      if (Number.isFinite(c)) { sb.spend += c; sb.costed++; }
+    }
     let tLeads = 0, tSpend = 0, tBankedSales = 0, tBanked = 0, anyCost = false;
     const bodyRows = econChannels.map(c => {
       const a = roiAgg[c];
-      const cost = costs[c];
-      const hasCost = Number.isFinite(cost);
-      const spend = hasCost ? a.leads * cost : null;
+      const sb = spendByChannel[c];
+      const hasCost = sb.costed > 0;
+      const spend = hasCost ? sb.spend : null;
       if (hasCost) { anyCost = true; tSpend += spend; }
       tLeads += a.leads; tBankedSales += a.bankedSales; tBanked += a.banked;
       const roi = (spend && spend > 0) ? a.banked / spend : null;
@@ -769,6 +852,12 @@ window.VIEWS.pipeline = function (root, ctx) {
       ${regNote}
       ${projBlock}
     `;
+  }
+  // Re-render the whole-book channel-volumes table (Dialfire media spend follows
+  // its editable cost). Guarded - the block only exists when wbAvail.
+  function drawChannelVol() {
+    const b = document.getElementById("channel-vol-block");
+    if (b) b.innerHTML = channelVolHtml();
   }
   drawRoi();
 

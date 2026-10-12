@@ -1,8 +1,8 @@
 // Lead economics — the money view of the lead book, merged from the former
 // Attribution and Lead P&L tabs. Three sections: (1) Tracked to a sale — what
 // each channel cost and the commission we can trace to a paid sale; (2) How
-// each sale was matched — the per-deal attribution detail; (3) Track a lead —
-// search any lead end to end. Reads the whole commission register (ctx.cache
+// each sale was matched - the per-deal attribution detail. (Lead-level search
+// lives on the dedicated Track tab.) Reads the whole commission register (ctx.cache
 // .salesDeals) + leads, scoped only by the sidebar DATE RANGE (leads by
 // datestamp_d, register rows by deal_date_d); the origin / division / source
 // sidebar filters are deliberately ignored. Super/admin only.
@@ -134,10 +134,6 @@ window.VIEWS["lead-economics"] = function (root, ctx) {
   for (const d of matched) if (d.match_method && byMethod[d.match_method] != null) byMethod[d.match_method]++;
   const matchedComm = matched.reduce((a, d) => a + num(d.total_gross_comm), 0);
 
-  const originPillPnl = (o) => {
-    const c = o === "Dialfire" ? blue : (o === "Meta" ? yellow : "#64748B");
-    return `<span class="pill" style="background:${c}22;color:${c};">${escapeHtml(o)}</span>`;
-  };
   const originPillAttr = (o) => o === "dialfire"
     ? `<span class="pill" style="background:#E8EEFB;color:${blue};">Dialfire</span>`
     : `<span class="pill" style="background:#FEF3C7;color:#92400E;">Seller Lead Bank</span>`;
@@ -149,10 +145,6 @@ window.VIEWS["lead-economics"] = function (root, ctx) {
     return `<span class="muted">—</span>`;
   };
   const fmtDate = (d) => d ? d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "2-digit" }) : "—";
-  const resultCell = (r) => {
-    const c = r.result === "Sold" ? green : (r.result === "Fell through" ? red : (r.result === "In progress" ? yellow : "#64748B"));
-    return `<span style="color:${c}; font-weight:600;">${escapeHtml(r.result)}</span>`;
-  };
 
   const attrRows = matched.map((d) => {
     const street = [d.street_number, d.street_name].filter(Boolean).join(" ").trim();
@@ -171,22 +163,6 @@ window.VIEWS["lead-economics"] = function (root, ctx) {
       <td>${d.deal_status === "PAID_OUT" ? `<span class="pill" style="background:#E7F5EC;color:#0F6E3B;">paid</span>` : `<span class="pill">${escapeHtml(d.deal_status || "—")}</span>`}</td>
     </tr>`;
   }).join("");
-
-  const rowHtml = (r) => `<tr>
-    <td><strong>${escapeHtml(r.name)}</strong></td>
-    <td>${originPillPnl(r.origin)}</td>
-    <td class="num">${r.cost == null ? '<span class="muted">n/a</span>' : randS(r.cost)}</td>
-    <td>${escapeHtml(r.stage)}</td>
-    <td>${resultCell(r)}</td>
-    <td class="num">${r.sold ? `<span style="color:${green};font-weight:700;">${randS(r.comm)}</span>` : '<span class="muted">n/a</span>'}</td>
-    <td class="num" style="color:${r.net < 0 ? red : (r.net > 0 ? green : "inherit")};">${r.net === 0 && !r.sold && r.cost == null ? '<span class="muted">n/a</span>' : randS(r.net)}</td>
-  </tr>`;
-  const MAX = 400;
-  const bodyHtml = (list) => list.length
-    ? list.slice(0, MAX).map(rowHtml).join("") + (list.length > MAX
-        ? `<tr><td colspan="7" class="muted" style="padding:12px;">Showing first ${MAX} of ${grp(list.length)}. Refine your search to narrow.</td></tr>` : "")
-    : `<tr><td colspan="7" class="muted" style="padding:18px;">No matching leads.</td></tr>`;
-  const defaultList = soldRows.slice().sort((a, b) => b.comm - a.comm);
 
   root.innerHTML = `
     <h2>Lead economics</h2>
@@ -235,33 +211,5 @@ window.VIEWS["lead-economics"] = function (root, ctx) {
         data (historically about 1 in 6). FT = Freehold Title (houses), ST = Sectional Title (apartments / flats / townhouses).
       </p>
     </section>
-
-    <section class="card" style="margin-top:16px;">
-      <h3>Track a lead</h3>
-      <p class="section-caption">Search by client name, address, deal name or email to trace one lead end to end. Empty search shows the leads that sold, top commission first.</p>
-      <input type="text" id="le-search" class="range-input" placeholder="Search a lead (name / address / email)…" style="max-width:420px; margin-bottom:12px;" autocomplete="off">
-      <div class="table-wrap"><table class="dt">
-        <thead><tr>
-          <th>Lead</th><th>Source</th><th class="num">Lead cost</th><th>HubSpot stage</th>
-          <th>Result</th><th class="num">Commission</th><th class="num">Net</th>
-        </tr></thead>
-        <tbody id="le-body">${bodyHtml(defaultList)}</tbody>
-      </table></div>
-      <p class="muted small" style="margin-top:10px;">
-        "Net" = commission banked minus lead cost. A lead only shows as <em>Sold</em> when its HubSpot deal is matched
-        to a paid deal in the register, so this is a floor: unmatched sales (seller not identifiable) aren't counted.
-      </p>
-    </section>
   `;
-
-  const $in = document.getElementById("le-search");
-  const $body = document.getElementById("le-body");
-  if ($in && $body) {
-    $in.addEventListener("input", () => {
-      const q = $in.value.toLowerCase().trim();
-      if (!q) { $body.innerHTML = bodyHtml(defaultList); return; }
-      const hits = rows.filter((r) => r._s.includes(q)).sort((a, b) => (b.sold - a.sold) || (b.comm - a.comm));
-      $body.innerHTML = bodyHtml(hits);
-    });
-  }
 };

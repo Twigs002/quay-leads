@@ -185,12 +185,26 @@ window.VIEWS.sources = function (root, ctx) {
       <div id="per-source-chart" style="height: 540px;"></div>
     </section>` : "";
 
+  // Whole-book channel weekly trend: Dialfire vs Broker vs Seller Lead Bank over
+  // time, same scope as the breakdown table (date range + divisions, rentals
+  // excluded). Separate from the sheet "Per-source weekly trend" because broker
+  // deals are a whole-book channel, not a sheet marketing source. Super/admin only.
+  const channelTrend = wbAvail ? `
+    <section class="card">
+      <h3>Channel weekly trend (whole book)</h3>
+      <p class="section-caption">Deals created per week by channel - Dialfire, Broker deals and Seller Lead Bank - over the current date range and divisions. Rentals excluded.</p>
+      <div id="wb-channel-weekly" style="height: 380px;"></div>
+    </section>` : "";
+
   // Render order: for Seller Lead Bank put the sheet Channel-quality table FIRST
   // (its by-source detail is what the user wants there, and the whole-book SLB
   // by-team table can run to 40+ rows and bury it). For All and the other
-  // channels keep the whole-book section first.
+  // channels keep the whole-book section first. The channel trend always sits
+  // with the whole-book section.
   const wb = wholeBookSection();
-  const ordered = (_origin === "slb") ? `${qualitySection}\n${wb}` : `${wb}\n${qualitySection}`;
+  const ordered = (_origin === "slb")
+    ? `${qualitySection}\n${wb}\n${channelTrend}`
+    : `${wb}\n${channelTrend}\n${qualitySection}`;
 
   root.innerHTML = `
     <h2>Sources</h2>
@@ -198,6 +212,32 @@ window.VIEWS.sources = function (root, ctx) {
 
     ${ordered}
   `;
+
+  // Whole-book channel weekly-trend chart (stacked). Drawn BEFORE the showSheet
+  // guard below so it renders for Dialfire / Broker too (those hide the sheet).
+  if (wbAvail) {
+    const CH_ORDER = ["dialfire", "team", "slb", "other"];
+    const chColor = { dialfire: THEME.tokens.blue, team: THEME.tokens.yellowDeep, slb: THEME.tokens.green, other: THEME.tokens.muted };
+    const wk = {};
+    for (const d of hsDeals) {
+      if (!wbInScope(d) || wbIsRental(d) || !d.createdate_d) continue;
+      const monday = new Date(d.createdate_d);
+      monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
+      monday.setHours(0, 0, 0, 0);
+      const w = monday.toISOString().slice(0, 10);
+      wk[`${w}|${wbChannel(d)}`] = (wk[`${w}|${wbChannel(d)}`] || 0) + 1;
+    }
+    const wks = Array.from(new Set(Object.keys(wk).map(k => k.split("|")[0]))).sort();
+    const chTraces = CH_ORDER
+      .filter(ch => wks.some(w => wk[`${w}|${ch}`]))
+      .map(ch => ({
+        type: "bar", name: CHAN_LABEL[ch], x: wks,
+        y: wks.map(w => wk[`${w}|${ch}`] || 0), marker: { color: chColor[ch] },
+      }));
+    Plotly.newPlot("wb-channel-weekly", chTraces,
+      { ...THEME.PLOTLY_LAYOUT, barmode: "stack", legend: { ...THEME.PLOTLY_LAYOUT.legend } },
+      THEME.PLOTLY_CONFIG);
+  }
 
   // Sheet charts (mix over time + per-source facets) only exist when the sheet
   // sections were rendered - skip them otherwise so Plotly never targets a

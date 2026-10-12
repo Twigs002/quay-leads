@@ -165,8 +165,9 @@ window.DATA = (() => {
       s.quay1_gross_comm = s.quay1_gross_comm == null ? null : Number(s.quay1_gross_comm);
       s.commission_incl_vat = s.commission_incl_vat == null ? null : Number(s.commission_incl_vat);
       s.is_rental = !!s.is_rental;
-      // Date used for monthly rollups: transfer date if present, else acceptance.
-      const dstr = s.transfer_date || s.acceptance_date || null;
+      // Date used for monthly rollups + the Lead economics "Deal date" column:
+      // acceptance date (when the deal was accepted), falling back to transfer.
+      const dstr = s.acceptance_date || s.transfer_date || null;
       s.deal_date_d = _parseDate(dstr);
     }
     // Rebuild the suburb reference table from the register (all suburbs), so

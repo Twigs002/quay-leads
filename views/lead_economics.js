@@ -3,7 +3,9 @@
 // each channel cost and the commission we can trace to a paid sale; (2) How
 // each sale was matched — the per-deal attribution detail; (3) Track a lead —
 // search any lead end to end. Reads the whole commission register (ctx.cache
-// .salesDeals) + leads; ignores the sidebar filters. Super/admin only.
+// .salesDeals) + leads, scoped only by the sidebar DATE RANGE (leads by
+// datestamp_d, register rows by deal_date_d); the origin / division / source
+// sidebar filters are deliberately ignored. Super/admin only.
 window.VIEWS = window.VIEWS || {};
 window.VIEWS["lead-economics"] = function (root, ctx) {
   if (!(ctx.user && (ctx.user.isSuper || ctx.user.isAdmin))) {
@@ -18,10 +20,10 @@ window.VIEWS["lead-economics"] = function (root, ctx) {
   const num = (v) => (v == null || v === "") ? 0 : (Number(v) || 0);
   const green = THEME.tokens.green, blue = THEME.tokens.blue, yellow = THEME.tokens.yellowDeep, red = "#B91C1C";
 
-  const leads = (ctx.cache && ctx.cache.leads) || [];
-  const sales = (ctx.cache && ctx.cache.salesDeals) || [];
+  const allLeads = (ctx.cache && ctx.cache.leads) || [];
+  const allSales = (ctx.cache && ctx.cache.salesDeals) || [];
 
-  if (!sales.length) {
+  if (!allSales.length) {
     root.innerHTML = `
       <h2>Lead economics</h2>
       <p class="lede">What each lead channel cost, the commission we can trace back to it, and how every sale was attributed.</p>
@@ -32,6 +34,16 @@ window.VIEWS["lead-economics"] = function (root, ctx) {
       </section>`;
     return;
   }
+
+  // Sidebar DATE RANGE is the only sidebar filter this view honours: leads by
+  // their arrival (datestamp_d), register rows by their deal date (deal_date_d).
+  // Both null (All) means no date filtering. Origin / division / source are left
+  // alone on purpose - this is a whole-book money view scoped only by time.
+  const _fs = (window.FILTERS && FILTERS.state) || {};
+  const _from = _fs.from || null, _to = _fs.to || null;
+  const _inRange = (d) => d && (!_from || d >= _from) && (!_to || d <= _to);
+  const leads = (_from || _to) ? allLeads.filter((l) => _inRange(l.datestamp_d)) : allLeads;
+  const sales = (_from || _to) ? allSales.filter((d) => _inRange(d.deal_date_d)) : allSales;
 
   function card(label, value, sub, accent) {
     return `<div class="kpi"${accent ? ` style="border-left:4px solid ${accent};"` : ""}>
@@ -96,7 +108,17 @@ window.VIEWS["lead-economics"] = function (root, ctx) {
   for (const r of soldRows) { const b = byOrigin[r.origin]; if (b) { b.n++; b.comm += r.comm; } }
 
   // ── Attribution detail (matched register rows) ────────────────────────────
-  const matched = sales.filter((d) => d.lead_matched).sort((a, b) => {
+  // Attribution detail, with garbage register rows dropped: a future deal date
+  // (not a real transfer yet) or a token commission under R100 (a placeholder
+  // stub, e.g. the bogus R11 "1 Buh Rein Drive" row matched to a dead deal) must
+  // never show as an attributed sale.
+  const matched = sales.filter((d) => {
+    if (!d.lead_matched) return false;
+    if (d.deal_date_d && d.deal_date_d > _now) return false;
+    const gc = num(d.total_gross_comm);
+    if (gc > 0 && gc < 100) return false;
+    return true;
+  }).sort((a, b) => {
     const ta = a.deal_date_d ? a.deal_date_d.getTime() : 0, tb = b.deal_date_d ? b.deal_date_d.getTime() : 0;
     return tb - ta || num(b.total_gross_comm) - num(a.total_gross_comm);
   });
@@ -163,7 +185,7 @@ window.VIEWS["lead-economics"] = function (root, ctx) {
   root.innerHTML = `
     <h2>Lead economics</h2>
     <p class="lede">What each lead channel cost, the commission we can trace back to a paid sale, and exactly how every
-      sale was attributed. Whole register; not narrowed by the sidebar filters.</p>
+      sale was attributed. Follows the sidebar date range; the other sidebar filters do not apply.</p>
 
     <section class="card" style="margin-top:16px;">
       <h3>Tracked to a sale</h3>

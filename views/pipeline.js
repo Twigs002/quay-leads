@@ -44,7 +44,14 @@ window.VIEWS.pipeline = function (root, ctx) {
   const leads = ctx.view.leads;
   const { escapeHtml, escapeAttr, emptyState } = UTILS;
   if (!leads.length) {
-    root.innerHTML = `<h2>Pipeline</h2>${emptyState()}`;
+    // Dialfire / Broker are whole-book-only channels with ~no sheet leads, so the
+    // sheet-based Pipeline economics are empty for them. Say so and point to where
+    // those volumes actually live, instead of a bare "no leads" state.
+    const origin = (window.FILTERS && FILTERS.state && FILTERS.state.leadOrigin) || null;
+    const note = (origin === "dialfire" || origin === "team")
+      ? emptyState("Pipeline lead-economics cover Seller Lead Bank + Meta leads only. Dialfire and Broker whole-book deal volumes are on the All Leads tab and in the Sources \"Channel breakdown (whole book)\" section.")
+      : emptyState();
+    root.innerHTML = `<h2>Pipeline</h2>${note}`;
     return;
   }
 

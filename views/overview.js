@@ -3,8 +3,50 @@ window.VIEWS = window.VIEWS || {};
 window.VIEWS.overview = function (root, ctx) {
   const leads = ctx.view.leads;
   const { escapeHtml, escapeAttr, pct, emptyState, fmtShortDate, humanAgo } = UTILS;
+  const T = (window.THEME && THEME.tokens) || {};
 
-  if (!leads.length) {
+  // ── Whole-book deal figures (hs_deals_all) ──────────────────────────────────
+  // The whole HubSpot deal book - every deal created, all channels - NOT just the
+  // Seller Lead Bank sheet. This is the only place true Dialfire cold-call leads
+  // and broker-created (CRM) deals exist, so the headline deal counts are driven
+  // from here. Honours the sidebar date range + lead-source filter + divisions,
+  // exactly like the All Leads view (same channel / team / rental helpers).
+  // Super/admin only (RLS-gated; empty for everyone else -> section hidden).
+  const hsDeals = (ctx.cache && ctx.cache.allDeals) || [];
+  const hsDealsAvail = hsDeals.length > 0;
+  const fstate = (window.FILTERS && FILTERS.state) || {};
+  const RENTAL_STAGES = new Set(["Rental Lead", "Referred to Rentals"]);
+  const NURTURE_STAGE = (window.STAGES && STAGES.NURTURE) || "Contacted - Lead to Nurture";
+  const wbIsWorked = (d) => d.stage_label === NURTURE_STAGE;
+  const wbIsRental = (d) => RENTAL_STAGES.has(d.stage_label);
+  function wbChannel(d) {
+    if (d.source) return d.source;
+    if (d.source_label === "CRM_UI") return "team";
+    if (d.source_label === "INTEGRATION") return "dialfire";
+    return "other";
+  }
+  const wbTeamOf = (d) => ((wbChannel(d) === "team" && d.created_by_team) ? d.created_by_team : d.team) || null;
+  const teamLc = (fstate.divisions && fstate.divisions.size)
+    ? new Set([...fstate.divisions].map((x) => (x || "").toLowerCase())) : null;
+  const inHsRange = (d) => d && (!fstate.from || d >= fstate.from) && (!fstate.to || d <= fstate.to);
+  const chanFilter = fstate.leadOrigin || null; // null | 'dialfire' | 'slb' | 'team'
+  const wbScope = (d) =>
+    inHsRange(d.createdate_d) &&
+    (!teamLc || teamLc.has((wbTeamOf(d) || "").toLowerCase())) &&
+    (!chanFilter || wbChannel(d) === chanFilter);
+  const wbDeals = hsDeals.filter(wbScope);
+  const wbRentals = wbDeals.filter(wbIsRental);
+  const wbSales = wbDeals.filter((d) => !wbIsRental(d));
+  const wbTotal = wbDeals.length;
+  const wbWorked = wbSales.filter(wbIsWorked).length;
+  const wbChan = { dialfire: 0, slb: 0, team: 0, other: 0 };
+  for (const d of wbSales) wbChan[wbChannel(d)] = (wbChan[wbChannel(d)] || 0) + 1;
+
+  // Sheet leads can legitimately be empty while the whole book has data - e.g. the
+  // sidebar is set to Dialfire or Broker deals, which have ~no sheet leads. Only
+  // bail out entirely when there is nothing at all to show.
+  const sheetEmpty = !leads.length;
+  if (sheetEmpty && !hsDealsAvail) {
     root.innerHTML = `<h2>Overview</h2><p class="lede">Showing 0 leads.</p>${emptyState()}`;
     return;
   }
@@ -27,21 +69,6 @@ window.VIEWS.overview = function (root, ctx) {
   const seller = leads.filter(l => l.is_lead === "Seller Lead").length;
   const hasDeal = leads.filter(l => l.has_deal).length;
   const worked = leads.filter(l => l.worked).length;
-
-  // True HubSpot deals CREATED in the current range (by deal createdate), from
-  // the whole deal book (hs_deals_all) — independent of the lead sheet, so this
-  // reconciles with HubSpot's "deals created" where the lead-based counts can't.
-  // Super/admin only (RLS-gated; empty for everyone else → card hidden).
-  const hsDeals = (ctx.cache && ctx.cache.allDeals) || [];
-  const fstate = window.FILTERS && FILTERS.state;
-  const teamLc = (fstate && fstate.divisions && fstate.divisions.size)
-    ? new Set([...fstate.divisions].map(x => (x || "").toLowerCase())) : null;
-  const inHsRange = d => d
-    && (!fstate || !fstate.from || d >= fstate.from)
-    && (!fstate || !fstate.to || d <= fstate.to);
-  const hsDealsCreated = hsDeals.filter(d =>
-    inHsRange(d.createdate_d) && (!teamLc || teamLc.has((d.team || "").toLowerCase()))).length;
-  const hsDealsAvail = hsDeals.length > 0;
 
   // ── Cost per qualified lead (item: R80 per meta lead) ───────────────────
   // Spend = (# meta-sourced leads) × R80. A META lead is "qualified" once its
@@ -141,11 +168,56 @@ window.VIEWS.overview = function (root, ctx) {
     </div>`;
   }
 
+  // Whole-book KPI card: left accent border + muted sub-label, matching the All
+  // Leads "By channel" row so the two views read as one visual system.
+  function wbCard(label, value, sub, accent) {
+    const style = accent ? ` style="border-left:4px solid ${accent};"` : "";
+    return `<div class="kpi"${style}>
+      <div class="label">${label}</div>
+      <div class="value">${typeof value === "number" ? value.toLocaleString() : value}</div>
+      ${sub ? `<div class="delta-row"><span class="muted small">${sub}</span></div>` : ""}
+    </div>`;
+  }
+
+  // Whole-book deal section (super/admin only). Hidden entirely when hs_deals_all
+  // isn't available to this user.
+  const wholeBookSection = hsDealsAvail ? `
+    <section class="card" style="margin-top: 16px;">
+      <h3>All deals (whole book)</h3>
+      <p class="section-caption">
+        Every deal created in HubSpot in the selected range - all channels, not just the Seller
+        Lead Bank sheet. Dated by deal <strong>createdate</strong>; honours the sidebar date range
+        and lead-source filter. This is the only place true Dialfire cold-call leads and
+        broker-created (CRM) deals appear.
+      </p>
+      <div class="kpis" style="margin-top: 4px;">
+        ${wbCard("Total deals created", wbTotal, "all channels, incl. rentals", T.ink)}
+        ${wbCard("Dialfire", wbChan.dialfire, "cold-call pipe", T.blue)}
+        ${wbCard("Broker deals", wbChan.team, "broker-created (CRM)", T.yellowDeep)}
+        ${wbCard("Seller Lead Bank", wbChan.slb, "inbound on the sheet", T.green)}
+        ${wbChan.other ? wbCard("Other", wbChan.other, "uncategorised", T.muted) : ""}
+        ${wbCard("Rentals", wbRentals.length, pct(wbRentals.length, wbTotal) + " · own line", T.skyDeep || T.blue)}
+        ${wbCard("Worked leads", wbWorked, pct(wbWorked, wbTotal) + " · Lead to Nurture", "#EC4899")}
+      </div>
+    </section>` : "";
+
+  // Shown in place of the sheet analytics when the sidebar is set to a whole-book
+  // only channel (Dialfire / Broker deals), which have ~no Seller Lead Bank rows.
+  const sheetNote = `
+    <section class="card" style="margin-top: 12px;">
+      ${emptyState("Seller-lead analytics cover Seller Lead Bank leads only. Set Lead source to All or Seller Lead Bank to see them.")}
+    </section>`;
+
   root.innerHTML = `
     <h2>Overview</h2>
-    <p class="lede">${leads.length.toLocaleString()} leads match the current filters.</p>
-    <p class="muted small" style="margin-top:-6px;">Counts are captured leads (one row per email). Any "deal" figure counts leads that carry a HubSpot deal, dated by lead-arrival — not every HubSpot deal created.</p>
+    <p class="lede">${hsDealsAvail ? `${wbTotal.toLocaleString()} deals created in range · ` : ""}${leads.length.toLocaleString()} Seller Lead Bank leads in view.</p>
+    <p class="muted small" style="margin-top:-6px;">Whole-book deal counts are every HubSpot deal created in range (below). The Seller Lead Bank section counts captured sheet leads (one row per email); any "deal" figure there counts leads that carry a HubSpot deal, dated by lead-arrival.</p>
 
+    ${wholeBookSection}
+
+    <h3 style="margin-top: 20px;">Seller Lead Bank (sheet leads)</h3>
+    <p class="section-caption" style="margin-top:-2px;">Captured leads from the Seller Lead Bank sheet only - not the whole deal book above.</p>
+    ${sheetEmpty ? sheetNote : `
     <div class="kpis">
       ${kpiCard("Leads in view", leads.length, "", "spark-total")}
       ${kpiCard("Last 30 days", last30, deltaPill(last30, prev30))}
@@ -153,7 +225,6 @@ window.VIEWS.overview = function (root, ctx) {
       ${kpiCard("Seller leads", seller, pct(seller, leads.length))}
       ${kpiCard("Has deal", hasDeal, pct(hasDeal, leads.length))}
       ${kpiCard("Worked", worked, pct(worked, leads.length))}
-      ${hsDealsAvail ? kpiCard("Deals created (HubSpot)", hsDealsCreated, "whole book · by deal createdate") : ""}
     </div>
 
     <section class="card" style="margin-top: 16px;">
@@ -250,6 +321,7 @@ window.VIEWS.overview = function (root, ctx) {
         </div>` : ""}
       </section>
     </div>
+  `}
   `;
 
   // Flag worklist: expand/collapse the table + CSV export. Guarded — the
@@ -278,6 +350,10 @@ window.VIEWS.overview = function (root, ctx) {
     }
   })();
 
+  // Sheet charts (sparkline, trend, mix, suburbs) only exist when the sheet body
+  // was rendered. When the sidebar is on a whole-book-only channel the sheet is
+  // empty, so skip them - their containers aren't in the DOM.
+  if (!sheetEmpty) {
   // Total-volume sparkline on the first KPI card
   (() => {
     const dayCounts = {};
@@ -362,4 +438,5 @@ window.VIEWS.overview = function (root, ctx) {
     marker: { color: THEME.tokens.yellow },
   }], { ...THEME.PLOTLY_LAYOUT, xaxis: { ...THEME.PLOTLY_LAYOUT.xaxis, title: "Leads" }, margin: { l: 140, r: 24, t: 24, b: 40 } },
      THEME.PLOTLY_CONFIG);
+  } // end if (!sheetEmpty)
 };

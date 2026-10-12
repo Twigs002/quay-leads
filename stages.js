@@ -141,16 +141,21 @@ window.STAGES = (() => {
   // Won the listing = has a mandate, or the rare fully-closed sale.
   function isWonListing(stage){ return MANDATE.has(stage) || stage === WON; }
   function isLost(stage)      { return COMPETITOR_LOST.has(stage); }
-  // Single source of truth for which acquisition channel a lead belongs to.
-  // Meta is its OWN channel (we paid Meta for the lead) even when the n8n pipe
-  // later auto-created its deal — so a Meta lead is never "Dialfire". A non-Meta
-  // auto-created deal is Dialfire (the cold-call pipe); a manually CRM-created
-  // deal is "team" (a broker made it themselves — "broker deals"); everything
-  // else is the Seller Lead Bank inbound sheet book. Mirrored by
-  // pipeline._econChannel, the All Leads view, and the sidebar filter.
+  // Single source of truth for which acquisition channel a SHEET lead belongs to.
+  // Meta is its OWN channel (we paid Meta for the lead). A manually CRM-created
+  // deal is "team" (a broker made it themselves - "broker deals"); everything
+  // else is the Seller Lead Bank inbound sheet book.
+  //
+  // IMPORTANT: a sheet lead is NEVER "dialfire". True Dialfire cold-call leads
+  // live only in the whole HubSpot deal book (hs_deals_all.source === 'dialfire'),
+  // not on the Seller Lead Bank sheet - every sheet lead that carries a deal is
+  // an SLB deal. An auto-created sheet deal is an SLB inbound deal the n8n pipe
+  // auto-created, not a cold call, so it must stay "slb". Dialfire/Broker channel
+  // splits come from the whole book (All Leads view + Overview whole-book section),
+  // never from this function. The sidebar Dialfire filter therefore matches ~0
+  // sheet leads by design. Mirrored by pipeline._econChannel.
   function leadChannel(l) {
     if (l && isMetaSource(l.source)) return "meta";
-    if (l && l.deal_creation === "auto") return "dialfire";
     if (l && l.deal_creation === "manual") return "team";
     return "slb";
   }

@@ -30,14 +30,15 @@ function _econRand(v) {
   const s = Math.abs(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ");
   return "R" + (n < 0 ? "-" + s : s);
 }
-// Which paid channel a lead belongs to, by ACQUISITION SOURCE. A Meta / Facebook
-// / fb source is Meta - what we paid to acquire the lead - regardless of who
-// later created the HubSpot deal (the Dialfire -> n8n pipe often auto-creates the
-// deal for a Meta lead, but we still paid Meta to get the lead). Only a lead that
-// is NOT a Meta source and whose deal was auto-created belongs to the Dialfire
-// calling pipe; everything else is the Seller Lead Bank sheet book.
+// Which paid channel a SHEET lead belongs to, by ACQUISITION SOURCE. A Meta /
+// Facebook / fb source is Meta - what we paid to acquire the lead. A manually
+// CRM-created deal is a Broker deal (a broker made it themselves); everything
+// else is the Seller Lead Bank sheet book. Sheet leads are never Dialfire - true
+// Dialfire cold-call leads live only in the whole deal book (see the All Leads
+// view + the Overview whole-book section), so "Dialfire" is kept in the map only
+// for safety and never appears from sheet leads. Mirrors STAGES.leadChannel.
 function _econChannel(l) {
-  return { meta: "Meta / Facebook", dialfire: "Dialfire", slb: "Seller Lead Bank" }[STAGES.leadChannel(l)];
+  return { meta: "Meta / Facebook", dialfire: "Dialfire", team: "Broker deals", slb: "Seller Lead Bank" }[STAGES.leadChannel(l)];
 }
 window.VIEWS.pipeline = function (root, ctx) {
   const leads = ctx.view.leads;
@@ -58,7 +59,7 @@ window.VIEWS.pipeline = function (root, ctx) {
   if (localStorage.getItem(__ECON_COST_LS) === null) {
     _econSaveCost("Meta / Facebook", STAGES.META_COST_PER_LEAD);
   }
-  const ECON_CHANNEL_ORDER = ["Meta / Facebook", "Dialfire", "Seller Lead Bank"];
+  const ECON_CHANNEL_ORDER = ["Meta / Facebook", "Dialfire", "Broker deals", "Seller Lead Bank"];
   const econChannels = (() => {
     const seen = new Set();
     for (const l of allBook) seen.add(_econChannel(l));

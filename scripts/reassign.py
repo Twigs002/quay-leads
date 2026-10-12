@@ -41,6 +41,14 @@ from supabase import Client, create_client
 # the sync writes into hs_deal_state.current_stage (and REASSIGN_STAGES in
 # data.js — keep the three in sync).
 QUALIFYING_STAGES = ["External Lead", "Calling Lead", "Inbound Lead"]
+# HubSpot dealstage IDs for the qualifying stages above, used by the armed
+# live re-verify (hs_get_deal) to check a deal's CURRENT stage straight from
+# HubSpot before moving it. sync.py resolves these same IDs back to the
+# QUALIFYING_STAGES labels at runtime (fetch_stage_labels GETs /pipelines/deals),
+# so there is no static id->label map there to import - this is the id-side
+# mirror of the label list, kept in step by hand. Calling Lead = "contractsent",
+# External Lead = "22157097", Inbound Lead = "10990605".
+QUALIFYING_STAGE_IDS = {"contractsent", "22157097", "10990605"}
 IDLE_HOURS = 72
 DEDUPE_HOURS = 20          # don't re-log the same deal within a day
 HS_API = "https://api.hubapi.com"
@@ -210,6 +218,25 @@ def hs_patch_owner(sess, object_type: str, object_id: str, owner_id: str):
     return r.json()
 
 
+def hs_get_deal(sess, deal_id: str):
+    """Live GET of a deal's current stage + owner straight from HubSpot.
+
+    Returns the parsed JSON dict, or None when HubSpot answers 404 (the deal was
+    deleted or merged away). Any OTHER non-200 propagates (hs_request raises) so
+    an ambiguous read is caught and logged like the other HubSpot errors - we
+    never move a deal on an uncertain read. Same throttle/backoff as the PATCH
+    helpers; armed --apply mode only."""
+    try:
+        r = hs_request(sess, "GET",
+                       f"{HS_API}/crm/v3/objects/deals/{deal_id}"
+                       "?properties=dealstage,hubspot_owner_id")
+    except requests.HTTPError as e:
+        if e.response is not None and e.response.status_code == 404:
+            return None
+        raise
+    return r.json()
+
+
 def fetch_deal_contacts(sess, deal_id: str) -> list[str]:
     """Contact ids associated with a deal. Armed --apply mode only."""
     r = hs_request(sess, "GET",
@@ -328,6 +355,60 @@ def main():
         would_move += 1
 
         if armed:
+            # Live re-verify immediately before the move: HubSpot is the source
+            # of truth, not the stored hs_deal_state row (which can be hours
+            # stale between syncs). This stops us moving a deal that has since
+            # advanced past a qualifying stage (e.g. a caller worked it into
+            # Lead to Nurture) or been deleted/merged away (404). Only the armed
+            # path does this; a DRY-RUN keeps previewing off stored state (see
+            # the else branch below), which is fine - it writes nothing. One
+            # extra GET only for candidates that passed every prior filter (a
+            # small set), each throttled by hs_request, so it stays well within
+            # the batch rate limit.
+            try:
+                live = hs_get_deal(sess, did)
+            except Exception as e:  # noqa: BLE001 - ambiguous read: log & skip, never move
+                row.update({"status": "error", "deal_patched": False,
+                            "error": f"live re-verify failed: {str(e)[:400]}"})
+                audit_rows.append(row)
+                continue
+
+            if live is None:
+                # Deal is gone from HubSpot (deleted/merged). Log the skip and
+                # drop the stale hs_deal_state row so it stops being re-flagged -
+                # and 404-ing - every night. Not counted as a move.
+                would_move -= 1
+                row.update({"status": "skipped", "deal_patched": False,
+                            "error": "deal no longer exists in HubSpot (404)"})
+                audit_rows.append(row)
+                try:
+                    sb.table("hs_deal_state").delete().eq("deal_id", did).execute()
+                    print(f"  🗑 {did} gone from HubSpot (404) - removed stale hs_deal_state row")
+                except Exception as e:  # noqa: BLE001 - cleanup is best-effort
+                    print(f"  ! failed to delete stale hs_deal_state row for {did}: {str(e)[:200]}")
+                continue
+
+            live_stage_id = str((live.get("properties") or {}).get("dealstage") or "")
+            if live_stage_id not in QUALIFYING_STAGE_IDS:
+                # Advanced past a qualifying stage since the last sync - do NOT
+                # reassign. Best-effort refresh the stored stage to the fresh id
+                # so it leaves the candidate query (stops nightly churn) and the
+                # dashboard reflects reality; the next full sync restores the
+                # readable label. Not counted as a move.
+                would_move -= 1
+                row.update({"status": "skipped", "deal_patched": False,
+                            "error": f"stage advanced since last sync (live={live_stage_id})"})
+                audit_rows.append(row)
+                try:
+                    sb.table("hs_deal_state").update({
+                        "current_stage_id": live_stage_id,
+                        "current_stage": live_stage_id,
+                    }).eq("deal_id", did).execute()
+                except Exception as e:  # noqa: BLE001 - stage refresh is best-effort
+                    print(f"  ! failed to refresh stored stage for {did}: {str(e)[:200]}")
+                print(f"  ⤴ {did} advanced to {live_stage_id} - skipped (no move)")
+                continue
+
             # Small-batch throttle: pause between every BATCH_SIZE armed moves
             # so a large backlog never bursts the HubSpot rate limit.
             if moves_done and moves_done % BATCH_SIZE == 0:
@@ -383,6 +464,8 @@ def main():
             if state_err:
                 row["error"] = f"deal+contacts moved but state not persisted: {state_err}"
         else:
+            # DRY-RUN previews off the stored hs_deal_state (no live re-verify,
+            # no HubSpot writes) - it only logs what an armed run would attempt.
             row.update({"status": "dry_run", "deal_patched": False,
                         "contacts_patched": 0})
 

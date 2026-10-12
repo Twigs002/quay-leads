@@ -185,12 +185,18 @@ window.VIEWS.sources = function (root, ctx) {
       <div id="per-source-chart" style="height: 540px;"></div>
     </section>` : "";
 
+  // Render order: for Seller Lead Bank put the sheet Channel-quality table FIRST
+  // (its by-source detail is what the user wants there, and the whole-book SLB
+  // by-team table can run to 40+ rows and bury it). For All and the other
+  // channels keep the whole-book section first.
+  const wb = wholeBookSection();
+  const ordered = (_origin === "slb") ? `${qualitySection}\n${wb}` : `${wb}\n${qualitySection}`;
+
   root.innerHTML = `
     <h2>Sources</h2>
     <p class="lede">Where leads come from, how they convert, and how the mix moves over time.</p>
 
-    ${wholeBookSection()}
-    ${qualitySection}
+    ${ordered}
   `;
 
   // Sheet charts (mix over time + per-source facets) only exist when the sheet
